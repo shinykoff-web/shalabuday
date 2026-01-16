@@ -1,0 +1,87 @@
+/* ========== Общие стили ========== */
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #111;
+  color: white;
+  font-family: sans-serif;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+}
+
+canvas {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none; /* клики проходят к кнопкам */
+}
+
+/* ========== Экраны (меню, выбор игроков, настройки) ========== */
+.screen {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 10; /* выше canvas */
+  text-align: center;
+}
+
+.hidden {
+  display: none;
+}
+
+/* ========== Кнопки ========== */
+button {
+  display: block;
+  margin: 10px auto;
+  padding: 15px 30px;
+  font-size: 20px;
+  border: none;
+  border-radius: 10px;
+  background: #444;
+  color: white;
+  cursor: pointer;
+}
+
+/* ========== Кнопки игроков (во время игры) ========== */
+.player-btn {
+  position: absolute;
+  width: 30vw;
+  max-width: 80px;
+  height: 30vw;
+  max-height: 80px;
+  border-radius: 50%;
+  font-size: 24px;
+  color: white;
+  border: none;
+  cursor: pointer;
+  z-index: 5; /* выше canvas, но ниже меню */
+}
+
+/* Расположение кнопок по углам */
+#btnBlue {
+  top: 40px;
+  left: 40px;
+}
+
+#btnGreen {
+  top: 40px;
+  right: 40px;
+}
+
+#btnRed {
+  bottom: 40px;
+  left: 40px;
+}
+
+#btnYellow {
+  bottom: 40px;
+  right: 40px;
+}
+
+/* Сенсорные устройства */
+#controls button {
+  touch-action: none;
+}

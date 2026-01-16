@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Boss Circle Game</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<!-- Меню -->
+<div id="menu" class="screen">
+  <button id="playBtn">Играть</button>
+  <button id="settingsBtn">Настройки</button>
+</div>
+
+<!-- Настройки (скрыто по умолчанию) -->
+<div id="settings" class="screen hidden">
+  <label>
+    <input type="checkbox" id="testMode"> Тест режим (50 очков)
+  </label>
+  <br>
+  <button id="backBtn">Назад</button>
+</div>
+
+<!-- Настройки (скрыто по умолчанию) -->
+<div id="settings" class="screen hidden">
+  <label>
+    <input type="checkbox" id="testMode"> Тест режим (100 очков)
+  </label>
+  <br>
+  <button id="backBtn">Назад</button>
+</div>
+
+<!-- Выбор количества игроков -->
+<div id="players" class="screen hidden">
+  <button data-count="1">1 игрок</button>
+  <button data-count="2">2 игрока</button>
+  <button data-count="3">3 игрока</button>
+  <button data-count="4">4 игрока</button>
+</div>
+
+<!-- Кнопки управления игроками (только во время игры) -->
+<div id="controls" class="hidden">
+  <button id="btnBlue" class="player-btn" style="background: blue;"></button>
+  <button id="btnGreen" class="player-btn" style="background: green;"></button>
+  <button id="btnRed" class="player-btn" style="background: red;"></button>
+  <button id="btnYellow" class="player-btn" style="background: yellow;"></button>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
