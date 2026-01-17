@@ -168,13 +168,7 @@ export class Game {
 
 startNextAttack() {
     const list = [
-      FireballAttack,
-      RocketAttack,
-      ZoneAttack,
-      LaserAttack,
-      AcidAttack,
-      GreenLaserAttack,
-      StraightLaserAttack
+      BombAttack
     ];
     const A = list[Math.floor(Math.random() * list.length)];
     this.currentAttack = new A(this.centerX, this.centerY, this.scores);
@@ -754,7 +748,7 @@ class AcidAttack {
       });
     }
 
-    setTimeout(() => (this.done = true), 7000);
+    setTimeout(() => (this.done = true), 3000);
   }
 
   update() {
@@ -774,6 +768,175 @@ class AcidAttack {
       ctx.beginPath();
       ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2);
       ctx.fill();
+    });
+  }
+}
+// ---------BombAttack----------
+class BombAttack {
+  constructor(cx, cy, scores) {
+    this.cx = cx;
+    this.cy = cy;
+    this.scores = scores;
+    this.maxPlayerScore = Math.max(...Object.values(scores));
+
+    this.bombs = [];
+    this.zone = [];
+    this.explosions = [];
+
+    this.done = false;
+    this.active = false;
+
+    this.zoneRadius = 50;
+    this.bombRadius = 20;
+
+    this.explosionDuration = 700; // длительность анимации взрыва (мс)
+
+    this.prepTime = Math.max(750, 1500 - (this.maxPlayerScore * 15));
+    this.bombCount = Math.min(5, 1 + Math.floor(this.maxPlayerScore / 10));
+
+    // красные зоны
+    for (let i = 0; i < this.bombCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const x = this.cx + Math.cos(angle) * CONFIG.circleRadius;
+      const y = this.cy + Math.sin(angle) * CONFIG.circleRadius;
+      this.zone.push({ x, y, visible: true });
+    }
+
+    setTimeout(() => {
+      this.active = true;
+      this.spawnBombs();
+    }, this.prepTime);
+  }
+
+  spawnBombs() {
+    const speed = 2 + this.maxPlayerScore / 20;
+
+    this.zone.forEach((z, i) => {
+      const dx = z.x - this.cx;
+      const dy = z.y - this.cy;
+      const dist = Math.hypot(dx, dy);
+
+      setTimeout(() => {
+        this.bombs.push({
+          x: this.cx,
+          y: this.cy,
+          vx: (dx / dist) * speed,
+          vy: (dy / dist) * speed,
+          targetX: z.x,
+          targetY: z.y,
+          exploded: false,
+          zoneIndex: i
+        });
+      }, i * 300);
+    });
+
+    setTimeout(() => {
+      this.done = true;
+    }, 2000 + this.bombCount * 100);
+  }
+
+  update() {
+    const now = performance.now();
+
+    this.bombs.forEach(b => {
+      if (!b.exploded) {
+        b.x += b.vx;
+        b.y += b.vy;
+
+        if (Math.hypot(b.x - b.targetX, b.y - b.targetY) < 5) {
+          b.exploded = true;
+          this.zone[b.zoneIndex].visible = false;
+
+          // создаём взрыв
+          this.explosions.push(this.createExplosion(b.targetX, b.targetY));
+        }
+      }
+    });
+
+    // обновляем взрывы
+    this.explosions = this.explosions.filter(e => {
+      return now - e.startTime < this.explosionDuration;
+    });
+  }
+
+  createExplosion(x, y) {
+    const particles = [];
+
+    for (let i = 0; i < 18; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const s = Math.random() * 2 + 1;
+      particles.push({
+        x,
+        y,
+        vx: Math.cos(a) * s,
+        vy: Math.sin(a) * s
+      });
+    }
+
+    return {
+      x,
+      y,
+      startTime: performance.now(),
+      particles
+    };
+  }
+
+  hitsPlayer(px, py) {
+    return this.explosions.some(e =>
+      Math.hypot(px - e.x, py - e.y) < this.zoneRadius
+    );
+  }
+
+  draw(ctx) {
+    const now = performance.now();
+
+    // красные зоны подготовки
+    this.zone.forEach(z => {
+      if (z.visible) {
+        ctx.fillStyle = `rgba(255,0,0,${0.3 + 0.2 * Math.sin(now / 200)})`;
+        ctx.beginPath();
+        ctx.arc(z.x, z.y, this.zoneRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+
+    // бомбы
+    this.bombs.forEach(b => {
+      if (!b.exploded) {
+        ctx.fillStyle = 'black';
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, this.bombRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+
+    // взрывы
+    this.explosions.forEach(e => {
+      const t = (now - e.startTime) / this.explosionDuration;
+      const radius = this.zoneRadius * (0.3 + t);
+      const alpha = 1 - t;
+
+      // основное свечение
+      const grad = ctx.createRadialGradient(
+        e.x, e.y, 0,
+        e.x, e.y, radius
+      );
+      grad.addColorStop(0, `rgba(255,220,120,${alpha})`);
+      grad.addColorStop(0.5, `rgba(255,140,0,${alpha * 0.7})`);
+      grad.addColorStop(1, 'rgba(255,60,0,0)');
+
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // частицы
+      ctx.fillStyle = `rgba(255,180,80,${alpha})`;
+      e.particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        ctx.fillRect(p.x, p.y, 3, 3);
+      });
     });
   }
 }
