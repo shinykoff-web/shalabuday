@@ -513,10 +513,20 @@ class StraightLaserAttack {
 
     // определяем количество лучей в серии
     let laserCount = 1;
-    if (this.maxPlayerScore >= 30) laserCount = 3;
-    if (this.maxPlayerScore >= 40) laserCount = 4;
-    if (this.maxPlayerScore >= 50) laserCount = 5;
-    else if (this.maxPlayerScore >= 20) laserCount = 2;
+
+if (this.maxPlayerScore >= 0 && this.maxPlayerScore < 10) {
+  laserCount = 1; 
+} else if (this.maxPlayerScore >= 10 && this.maxPlayerScore < 20) {
+  laserCount = 2; 
+} else if (this.maxPlayerScore >= 20 && this.maxPlayerScore < 30) {
+  laserCount = 3; 
+} else if (this.maxPlayerScore >= 30 && this.maxPlayerScore < 40) {
+  laserCount = 4; 
+} else if (this.maxPlayerScore >= 40 && this.maxPlayerScore < 50) {
+  laserCount = 5; 
+} else if (this.maxPlayerScore >= 50) {
+  laserCount = 10; 
+}
 
     // генерируем случайные углы для лучей
     this.angles = [];
@@ -525,7 +535,7 @@ class StraightLaserAttack {
     }
 
     // подготовка (тонкий лазер)
-    let prepTime = this.maxPlayerScore >= 50 ? 1500: 750;
+    let prepTime = this.maxPlayerScore >= 50 ? 1000: 750;
     this.active = false;
 
     setTimeout(() => {
@@ -744,7 +754,7 @@ class AcidAttack {
       });
     }
 
-    setTimeout(() => (this.done = true), 4500);
+    setTimeout(() => (this.done = true), 7000);
   }
 
   update() {
