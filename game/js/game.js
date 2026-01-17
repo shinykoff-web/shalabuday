@@ -168,6 +168,14 @@ export class Game {
 
 startNextAttack() {
     const list = [
+      EdgeStraightLaserAttack,
+      FireballAttack,
+      RocketAttack,
+      ZoneAttack,
+      LaserAttack,
+      AcidAttack,
+      GreenLaserAttack,
+      StraightLaserAttack,
       BombAttack
     ];
     const A = list[Math.floor(Math.random() * list.length)];
@@ -293,8 +301,11 @@ class FireballAttack {
 }
 
 /* ===================== ROCKET ===================== */
+// ---------------- RocketAttack ----------------
+const rocketImg = new Image();
+rocketImg.src = 'assets/rocket.png'; // путь к вашей PNG ракете
 
-class RocketAttack {
+export class RocketAttack {
   constructor(cx, cy, scores) {
     this.cx = cx;
     this.cy = cy;
@@ -305,21 +316,37 @@ class RocketAttack {
 
     const maxPlayerScore = Math.max(...Object.values(scores));
 
-    this.rocketCount = maxPlayerScore < 10 ? 2 : 3;
+    // скорость ракет
     this.speedMult = maxPlayerScore >= 30 ? 3 : maxPlayerScore >= 20 ? 2 : 1;
 
+    // количество ракет в серии
+    this.rocketCount = maxPlayerScore < 10 ? 2 : 3;
+
+    // количество серий (50+ очков → 4 серии)
+    this.series = maxPlayerScore >= 50 ? 4 : 1;
+
+    // запускаем серии
+    this.launchSeries(0);
+
+    // завершение атаки через 5 секунд + задержка для серий
+    setTimeout(() => { this.done = true; }, 1000 + (this.series - 1) * 1500);
+  }
+
+  launchSeries(currentSeries) {
+    if (currentSeries >= this.series) return;
+
+    // точки спавна
     const SPAWNS = [
       { x: 0, y: -CONFIG.circleRadius - 70, vx: 0, vy: 3 },   // сверху
-      { x: 0, y:  CONFIG.circleRadius + 70, vx: 0, vy: -3 }, // снизу
-      { x: -CONFIG.circleRadius - 70, y: 0, vx: 3, vy: 0 },  // слева
-      { x:  CONFIG.circleRadius + 70, y: 0, vx: -3, vy: 0 }  // справа
+      { x: 0, y:  CONFIG.circleRadius + 70, vx: 0, vy: -3 },  // снизу
+      { x: -CONFIG.circleRadius - 70, y: 0, vx: 3, vy: 0 },   // слева
+      { x:  CONFIG.circleRadius + 70, y: 0, vx: -3, vy: 0 }   // справа
     ];
 
     const spawn = SPAWNS[Math.floor(Math.random() * SPAWNS.length)];
 
     const towerOffset = 130;
 
-    // смещения для самих ракет
     const verticalOffsets = [
       { x: -130, y: 0 },
       { x: 130, y: 0 },
@@ -334,7 +361,6 @@ class RocketAttack {
     const isHorizontal = spawn.vx !== 0;
     const OFFSETS = isHorizontal ? horizontalOffsets : verticalOffsets;
 
-    // ⚠️ отдельные смещения для предупреждений
     const verticalWarningOffsets = [
       { x: -25, y: 0 },
       { x: 25, y: 0 },
@@ -357,39 +383,46 @@ class RocketAttack {
       let warningX = this.cx + (x - this.cx) * factor;
       let warningY = this.cy + (y - this.cy) * factor;
 
-      // применяем смещение только для этой группы
       const extra = WARNING_OFFSETS[i] || { x: 0, y: 0 };
       warningX += extra.x;
       warningY += extra.y;
 
       this.warnings.push({ x: warningX, y: warningY });
 
-      // ракета вылетает через 1.5 секунды
+      // ракета вылетает через 1 секунду после появления метки
       setTimeout(() => {
+        // вычисляем угол поворота по направлению движения
+        const angle = Math.atan2(spawn.vy, spawn.vx);
+
         this.rockets.push({
           x,
           y,
           vx: spawn.vx * this.speedMult,
-          vy: spawn.vy * this.speedMult
+          vy: spawn.vy * this.speedMult,
+          angle,
+          width: 32,
+          height: 50
         });
-      }, 1500);
+      }, 1000);
     }
 
+    // убираем метки через 1 секунду
     setTimeout(() => { this.warnings.length = 0; }, 1000);
-    setTimeout(() => { this.done = true; }, 5000);
+
+    // запускаем следующую серию через 1.2 секунды
+    setTimeout(() => this.launchSeries(currentSeries + 1), 1200);
   }
 
   update() {
     this.rockets.forEach(r => {
       r.x += r.vx;
       r.y += r.vy;
+      r.angle = Math.atan2(r.vy, r.vx);
     });
   }
 
   hitsPlayer(px, py) {
-    return this.rockets.some(
-      r => Math.hypot(px - r.x, py - r.y) < 16
-    );
+    return this.rockets.some(r => Math.hypot(px - r.x, py - r.y) < 16);
   }
 
   draw(ctx) {
@@ -398,12 +431,23 @@ class RocketAttack {
       ctx.fillText('⚠️', w.x - 12, w.y + 12);
     });
 
-    ctx.fillStyle = 'red';
     this.rockets.forEach(r => {
-      ctx.fillRect(r.x - 8, r.y - 8, 16, 16);
+      ctx.save();
+      ctx.translate(r.x, r.y);
+      ctx.rotate(r.angle - Math.PI / -2); // корректируем для вертикальной PNG
+      if (rocketImg.complete) {
+        ctx.drawImage(rocketImg, -r.width / 2, -r.height / 2, r.width, r.height);
+      } else {
+        ctx.fillStyle = 'red';
+        ctx.fillRect(-8, -8, 16, 16);
+      }
+      ctx.restore();
     });
   }
 }
+
+
+
 
 /* ===================== ZONE ===================== */
 
@@ -938,5 +982,131 @@ class BombAttack {
         ctx.fillRect(p.x, p.y, 3, 3);
       });
     });
+  }
+}
+/* ===================== EdgeStraightLaserAttack ===================== */
+export class EdgeStraightLaserAttack {
+  constructor(cx, cy, scores) {
+    this.cx = cx;
+    this.cy = cy;
+    this.scores = scores;
+
+    this.maxPlayerScore = Math.max(...Object.values(scores));
+
+    this.active = false;
+    this.done = false;
+    this.currentSeries = 0;
+    this.totalSeries = 5; // всего серий
+
+    this.laserWidthThin = 2;
+    this.laserWidthThick = 8;
+    this.laserLength = CONFIG.circleRadius * 2; // лазер проходит через хорду
+
+    this.seriesLasers = []; // массив лазеров текущей серии
+
+    this.startSeries();
+  }
+
+  startSeries() {
+    if (this.currentSeries >= this.totalSeries) {
+      this.done = true;
+      return;
+    }
+
+    this.currentSeries++;
+
+    // определяем количество лазеров в серии
+    let laserCount = 1;
+    if (this.maxPlayerScore >= 10) laserCount = 2;
+    if (this.maxPlayerScore >= 20) laserCount = 3;
+    if (this.maxPlayerScore >= 30) laserCount = 4;
+    if (this.maxPlayerScore >= 40) laserCount = 5;
+    if (this.maxPlayerScore >= 50) laserCount = 10;
+
+    // генерируем случайные смещения от центра, чтобы лазеры не проходили через центр
+    const offsets = [];
+    for (let i = 0; i < laserCount; i++) {
+      offsets.push((Math.random() - 0.5) * CONFIG.circleRadius * 1.5); // случайное смещение по перпендикуляру к линии
+    }
+
+    // генерируем случайные углы направления лазеров
+    this.seriesLasers = offsets.map(offset => {
+      const angle = Math.random() * Math.PI * 2; // направление лазера
+      return { angle, offset };
+    });
+
+    this.active = false;
+
+    // подготовка (тонкий лазер)
+    const prepTime = this.maxPlayerScore >= 50 ? 1000 : 750;
+
+    setTimeout(() => {
+      this.active = true; // активный лазер
+    }, prepTime);
+
+    // переход к следующей серии после окончания этой
+    setTimeout(() => this.startSeries(), prepTime + 500); // 0.5s активного лазера
+  }
+
+  update() {
+    // лазеры статичные, вращение не используется
+  }
+
+  hitsPlayer(px, py) {
+    if (!this.active) return false;
+
+    const R = CONFIG.circleRadius;
+
+    return this.seriesLasers.some(laser => {
+      const dx = Math.cos(laser.angle);
+      const dy = Math.sin(laser.angle);
+
+      // смещаем линию от центра по перпендикуляру
+      const perpX = -dy * laser.offset;
+      const perpY = dx * laser.offset;
+
+      // проектируем игрока на линию лазера
+      const t = (px - (this.cx + perpX)) * dx + (py - (this.cy + perpY)) * dy;
+      const lx = this.cx + perpX + t * dx;
+      const ly = this.cy + perpY + t * dy;
+
+      // ограничиваем длину лазера хордами круга
+      const maxLen = Math.sqrt(R * R - laser.offset * laser.offset);
+      if (t < -maxLen || t > maxLen) return false;
+
+      return Math.hypot(px - lx, py - ly) < this.laserWidthThick;
+    });
+  }
+
+  draw(ctx) {
+    ctx.save();
+    ctx.translate(this.cx, this.cy);
+
+    this.seriesLasers.forEach(laser => {
+      const dx = Math.cos(laser.angle);
+      const dy = Math.sin(laser.angle);
+
+      // смещение по перпендикуляру
+      const perpX = -dy * laser.offset;
+      const perpY = dx * laser.offset;
+
+      const R = CONFIG.circleRadius;
+      const halfLen = Math.sqrt(R * R - laser.offset * laser.offset);
+
+      ctx.beginPath();
+      if (!this.active) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+        ctx.lineWidth = this.laserWidthThin;
+      } else {
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = this.laserWidthThick;
+      }
+
+      ctx.moveTo(perpX - dx * halfLen, perpY - dy * halfLen);
+      ctx.lineTo(perpX + dx * halfLen, perpY + dy * halfLen);
+      ctx.stroke();
+    });
+
+    ctx.restore();
   }
 }
