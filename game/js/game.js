@@ -168,8 +168,13 @@ export class Game {
 
 startNextAttack() {
     const list = [
-      RocketAttack
-
+      FireballAttack,
+      RocketAttack,
+      ZoneAttack,
+      LaserAttack,
+      AcidAttack,
+      GreenLaserAttack,
+      StraightLaserAttack
     ];
     const A = list[Math.floor(Math.random() * list.length)];
     this.currentAttack = new A(this.centerX, this.centerY, this.scores);
