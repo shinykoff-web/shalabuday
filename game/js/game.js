@@ -1,8 +1,88 @@
 import { Player } from './player.js';
 import { CONFIG } from './config.js';
 
-/* ===================== GAME ===================== */
+/* ===================== OVERLOAD MANAGER ===================== */
 
+class OverloadManager {
+  constructor(game) {
+    this.game = game;
+    this.active = false;
+    this.started = false;
+
+    this.threshold = 50;        // с каких очков
+    this.introDelay = 3000;     // пауза перед стартом атак
+    this.nextAttackDelay = 400;
+
+    this.music = new Audio('assets/overload.mp3');
+    this.music.loop = true;
+    this.music.volume = 0.6;
+  }
+
+  getMaxScore() {
+    return Math.max(...Object.values(this.game.scores));
+  }
+
+  check() {
+    if (this.active) return;
+
+    if (this.getMaxScore() >= this.threshold) {
+      this.activate();
+    }
+  }
+
+  activate() {
+    this.active = true;
+    this.started = false;
+
+    // останавливаем атаки
+    this.game.currentAttack = null;
+    this.game.nextAttackTime = Date.now() + this.introDelay;
+
+    // запускаем музыку
+    this.music.play().catch(() => {});
+
+    setTimeout(() => {
+      this.started = true;
+    }, this.introDelay);
+  }
+
+  canSpawnAttacks() {
+    return this.active && this.started;
+  }
+
+  createDuoAttack() {
+    const laserAttacks = [
+      LaserAttack,
+      GreenLaserAttack,
+      StraightLaserAttack,
+      EdgeStraightLaserAttack
+    ];
+
+    const otherAttacks = [
+      FireballAttack,
+      RocketAttack,
+      BombAttack,
+      AcidAttack,
+      ZoneAttack
+    ];
+
+    let first = Math.random() < 0.5
+      ? laserAttacks[Math.floor(Math.random() * laserAttacks.length)]
+      : otherAttacks[Math.floor(Math.random() * otherAttacks.length)];
+
+    let secondPool =
+      laserAttacks.includes(first) ? otherAttacks : laserAttacks;
+
+    let second =
+      secondPool[Math.floor(Math.random() * secondPool.length)];
+
+    return [
+      new first(this.game.centerX, this.game.centerY, this.game.scores),
+      new second(this.game.centerX, this.game.centerY, this.game.scores)
+    ];
+  }
+}
+/* ===================== GAME ===================== */
 export class Game {
   constructor(canvas, playerCount, testMode = false) {
     this.ctx = canvas.getContext('2d');
@@ -11,9 +91,9 @@ export class Game {
     this.centerX = canvas.width / 2;
     this.centerY = canvas.height / 2;
 
+    // Игроки
     this.players = [];
     const colors = ['blue', 'green', 'red', 'yellow'];
-
     for (let i = 0; i < playerCount; i++) {
       const angle = (Math.PI * 2 / playerCount) * i;
       this.players.push(new Player(colors[i], angle));
@@ -21,15 +101,35 @@ export class Game {
 
     this.scores = {};
     this.testMode = testMode;
-    this.godMode = false; // бессмертие по умолчанию выключено
+    this.godMode = false;
+    this.players.forEach(p => this.scores[p.color] = this.testMode ? 50 : 0);
 
-    // сразу применяем очки для тест режима
-    this.players.forEach(p => {
-      this.scores[p.color] = this.testMode ? 50 : 0;
-    });
+    // 3D куб
+    this.bossSize = 50;
+    this.bossScaleStart = 1 / 1.5;
+    this.bossScaleEnd = 1.1;
+    this.currentBossScale = this.bossScaleStart;
+    this.bossAngleX = 0;
+    this.bossAngleY = 0;
+    this.bossAngleZ = 0;
+    this.bossSpeedX = 0.01;
+    this.bossSpeedY = 0.01;
+    this.bossSpeedZ = 0.01;
+
+    // Overload
+    this.overloadActive = false;
+    this.overloadMusic = new Audio('assets/overload.mp3');
+    this.overloadDelay = 8000;
+    this.pulses = [];
 
     this.currentAttack = null;
     this.nextAttackTime = Date.now() + 1000;
+
+    // Таймер игры
+    this.timerActive = false;
+    this.timerStart = null;
+    this.timerDuration = 60000; // 1 минута
+    this.pauseMenuActive = false;
 
     this.setupInput(playerCount);
     this.setupRespawnBind();
@@ -52,23 +152,19 @@ export class Game {
       } else btn.style.display = 'none';
     });
 
-    // -------------------- тест режим --------------------
     const testModeCheckbox = document.getElementById('testMode');
     if (testModeCheckbox) {
-      testModeCheckbox.checked = this.testMode; // синхронизируем чекбокс с текущим состоянием
+      testModeCheckbox.checked = this.testMode;
       testModeCheckbox.onchange = () => {
         this.testMode = testModeCheckbox.checked;
         this.players.forEach(p => (this.scores[p.color] = this.testMode ? 50 : 0));
         this.updateButtonScores();
       };
     }
-
-    // -------------------- обновляем очки --------------------
     this.updateButtonScores();
   }
 
   setupRespawnBind() {
-    // Нажатие R включает/выключает бессмертие
     window.addEventListener('keydown', e => {
       if (e.key.toLowerCase() === 'r') {
         this.godMode = !this.godMode;
@@ -98,59 +194,256 @@ export class Game {
 
   update() {
     const now = Date.now();
-    this.players.forEach(p => p.update());
+    if (this.pauseMenuActive) return;
 
-    if (!this.currentAttack && now > this.nextAttackTime) {
-      this.startNextAttack();
+    this.players.forEach(p => p.update());
+    const maxScore = Math.max(...Object.values(this.scores));
+
+    // Overload режим
+    if (!this.overloadActive && maxScore >= 50) {
+      this.overloadActive = true;
+      if (this.overloadMusic) this.overloadMusic.play();
+      this.nextAttackTime = now + this.overloadDelay;
+
+      // запускаем таймер игры
+      this.timerActive = true;
+      this.timerStart = now;
     }
 
+    // масштаб куба
+    const scaleProgress = Math.min(maxScore / 50, 1);
+    this.currentBossScale = this.bossScaleStart + (this.bossScaleEnd - this.bossScaleStart) * scaleProgress;
+
+    // вращение куба
+    this.bossAngleX += this.bossSpeedX;
+    this.bossAngleY += this.bossSpeedY;
+    this.bossAngleZ += this.bossSpeedZ;
+
+    // запускаем следующую атаку
+    if (!this.currentAttack && now > this.nextAttackTime) {
+      this.startNextAttack();
+      this.bossSpeedX = (Math.random() * 0.03 - 0.015) * (1 + maxScore / 50);
+      this.bossSpeedY = (Math.random() * 0.03 - 0.015) * (1 + maxScore / 50);
+      this.bossSpeedZ = (Math.random() * 0.03 - 0.015) * (1 + maxScore / 50);
+    }
+
+    // обновляем текущую атаку
     if (this.currentAttack) {
-      this.currentAttack.update();
-      if (this.currentAttack.done) {
-        this.players.forEach(p => {
-          if (p.alive) this.scores[p.color]++;
-        });
+      const attacks = Array.isArray(this.currentAttack) ? this.currentAttack : [this.currentAttack];
+      attacks.forEach(a => a.update?.());
+
+      // проверка завершения атак
+      if (attacks.every(a => a.done)) {
+        this.players.forEach(pl => { if (pl.alive) this.scores[pl.color]++; });
         this.updateButtonScores();
         this.currentAttack = null;
         this.nextAttackTime = now + 600;
       }
     }
 
+    // проверка попадания игрока
     this.players.forEach(p => {
       if (!p.alive || !this.currentAttack) return;
       const pos = this.getPlayerPos(p);
-      if (!this.godMode && this.currentAttack.hitsPlayer?.(pos.x, pos.y)) {
-        p.alive = false;
-      }
+      const attacks = Array.isArray(this.currentAttack) ? this.currentAttack : [this.currentAttack];
+      attacks.forEach(a => { if (!this.godMode && a.hitsPlayer?.(pos.x, pos.y)) p.alive = false; });
     });
+
+    // пульсация круга
+    if (this.overloadActive) {
+      if (!this.lastPulseTime || now - this.lastPulseTime > 1500) {
+        this.pulses.push({ radius: 0, alpha: 1.0 });
+        this.lastPulseTime = now;
+      }
+      this.pulses.forEach(p => { p.radius += 2; p.alpha -= 0.02; });
+      this.pulses = this.pulses.filter(p => p.alpha > 0);
+    }
+
+    // таймер завершения игры
+    if (this.timerActive && now - this.timerStart >= this.timerDuration) {
+      this.timerActive = false;
+      this.showPauseMenu();
+    }
   }
 
   draw() {
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    const ctx = this.ctx;
+    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // круг
-    this.ctx.strokeStyle = 'white';
-    this.ctx.beginPath();
-    this.ctx.arc(this.centerX, this.centerY, CONFIG.circleRadius, 0, Math.PI * 2);
-    this.ctx.stroke();
+    // арена
+    ctx.strokeStyle = 'white';
+    ctx.beginPath();
+    ctx.arc(this.centerX, this.centerY, CONFIG.circleRadius, 0, Math.PI * 2);
+    ctx.stroke();
 
-    // босс
-    this.ctx.save();
-    this.ctx.translate(this.centerX, this.centerY);
-    this.ctx.beginPath();
-    this.ctx.moveTo(0, -30);
-    this.ctx.lineTo(-25, 20);
-    this.ctx.lineTo(25, 20);
-    this.ctx.closePath();
-    this.ctx.fillStyle = 'white';
-    this.ctx.fill();
-    this.ctx.restore();
+    // рисуем 3D куб
+    this.drawBossCube();
 
     // игроки
-    this.players.forEach(p => p.draw(this.ctx, this.centerX, this.centerY));
+    this.players.forEach(p => p.draw(ctx, this.centerX, this.centerY));
 
-    // текущая атака
-    this.currentAttack?.draw(this.ctx);
+    // текущие атаки
+    const attacks = Array.isArray(this.currentAttack) ? this.currentAttack : [this.currentAttack];
+    attacks.forEach(a => a?.draw(ctx));
+
+    // пульсация круга
+    this.pulses.forEach(p => {
+      ctx.beginPath();
+      ctx.arc(this.centerX, this.centerY, CONFIG.circleRadius + p.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255,255,255,${p.alpha})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    });
+
+    // таймер сверху
+    if (this.timerActive) {
+      const remaining = Math.ceil((this.timerDuration - (Date.now() - this.timerStart))/1000);
+      ctx.fillStyle = 'white';
+      ctx.font = '24px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(` ${remaining}s`, this.centerX, 30);
+    }
+
+    // меню паузы
+    if (this.pauseMenuActive) {
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(0,0,this.canvas.width,this.canvas.height);
+      ctx.fillStyle = 'white';
+      ctx.font = '30px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('Вы прошли основную часть, хотите продолжить?', this.centerX, this.centerY-40);
+    }
+  }
+
+  drawBossCube() {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(this.centerX, this.centerY);
+
+    const s = this.bossSize * this.currentBossScale;
+    const vertices = [
+      {x:-s,y:-s,z:-s},{x:s,y:-s,z:-s},{x:s,y:s,z:-s},{x:-s,y:s,z:-s},
+      {x:-s,y:-s,z:s},{x:s,y:-s,z:s},{x:s,y:s,z:s},{x:-s,y:s,z:s}
+    ];
+
+    const rotated = vertices.map(v=>{
+      let r = this.rotateX(v,this.bossAngleX);
+      r = this.rotateY(r,this.bossAngleY);
+      r = this.rotateZ(r,this.bossAngleZ);
+      return r;
+    });
+
+    const edges = [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]];
+
+    ctx.strokeStyle = 'white';
+    ctx.beginPath();
+    edges.forEach(([i,j])=>{
+      const p1 = rotated[i], p2 = rotated[j];
+      const scale1 = 300/(300+p1.z), scale2 = 300/(300+p2.z);
+      ctx.moveTo(p1.x*scale1, p1.y*scale1);
+      ctx.lineTo(p2.x*scale2, p2.y*scale2);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  rotateX(v, angle){ const cos=Math.cos(angle), sin=Math.sin(angle); return {x:v.x, y:v.y*cos-v.z*sin, z:v.y*sin+v.z*cos}; }
+  rotateY(v, angle){ const cos=Math.cos(angle), sin=Math.sin(angle); return {x:v.x*cos+v.z*sin, y:v.y, z:-v.x*sin+v.z*cos}; }
+  rotateZ(v, angle){ const cos=Math.cos(angle), sin=Math.sin(angle); return {x:v.x*cos-v.y*sin, y:v.x*sin+v.y*cos, z:v.z}; }
+
+  getPlayerPos(p){ return { x:this.centerX+Math.cos(p.angle)*CONFIG.circleRadius, y:this.centerY+Math.sin(p.angle)*CONFIG.circleRadius }; }
+
+  // --------- меню паузы ---------
+  showPauseMenu() {
+    this.pauseMenuActive = true;
+    this.currentAttack = null; // очищаем атаки
+    this.createPauseButtons();
+  }
+
+  createPauseButtons() {
+    const yesBtn = document.createElement('button');
+    yesBtn.textContent = 'Да';
+    yesBtn.style.position = 'absolute';
+    yesBtn.style.left = '40%';
+    yesBtn.style.top = '60%';
+    yesBtn.style.zIndex = 1000;
+    document.body.appendChild(yesBtn);
+
+    const noBtn = document.createElement('button');
+    noBtn.textContent = 'Нет';
+    noBtn.style.position = 'absolute';
+    noBtn.style.left = '55%';
+    noBtn.style.top = '60%';
+    noBtn.style.zIndex = 1000;
+    document.body.appendChild(noBtn);
+
+    yesBtn.onclick = () => {
+      yesBtn.remove();
+      noBtn.remove();
+      this.pauseMenuActive = false;
+      this.nextAttackTime = Date.now() + 3000; // пауза перед продолжением
+    };
+
+    noBtn.onclick = () => {
+      yesBtn.remove();
+      noBtn.remove();
+      this.pauseMenuActive = false;
+      this.overloadActive = false;
+      window.location.href = 'index.html';
+    };
+  }
+
+  startNextAttack() {
+    const list = [
+      EdgeStraightLaserAttack, FireballAttack, RocketAttack, ZoneAttack,
+      LaserAttack, AcidAttack, GreenLaserAttack, StraightLaserAttack, BombAttack
+    ];
+
+    if (!this.overloadActive) {
+      const idx = Math.floor(Math.random()*list.length);
+      this.currentAttack = new list[idx](this.centerX,this.centerY,this.scores);
+      return;
+    }
+
+    // Duo атаки
+    const laserAttacks = ['LaserAttack','GreenLaserAttack','StraightLaserAttack','EdgeStraightLaserAttack'];
+    const zoneAttacks = ['ZoneAttack'];
+    const bombAttacks = ['BombAttack'];
+
+    let firstAttackClass, secondAttackClass;
+
+    while (true) {
+      const firstIdx = Math.floor(Math.random()*list.length);
+      const secondIdx = Math.floor(Math.random()*list.length);
+      firstAttackClass = list[firstIdx];
+      secondAttackClass = list[secondIdx];
+
+      const fName = firstAttackClass.name;
+      const sName = secondAttackClass.name;
+
+      const fIsLaser = laserAttacks.includes(fName);
+      const sIsLaser = laserAttacks.includes(sName);
+      const fIsZone = zoneAttacks.includes(fName);
+      const sIsZone = zoneAttacks.includes(sName);
+      const fIsBomb = bombAttacks.includes(fName);
+      const sIsBomb = bombAttacks.includes(sName);
+
+      // GreenLaser всегда одиночный
+      if (fName==='GreenLaserAttack' || sName==='GreenLaserAttack') { secondAttackClass = null; }
+
+      if (
+        (fIsLaser && sIsLaser) ||
+        (fIsZone && sIsZone) ||
+        (fIsLaser && sIsZone) ||
+        (fIsZone && sIsLaser) ||
+        (fIsZone && sIsBomb) ||
+        (fIsBomb && sIsZone)
+      ) continue; // повторяем выбор
+      break;
+    }
+
+    this.currentAttack = [ new firstAttackClass(this.centerX,this.centerY,this.scores) ];
+    if (secondAttackClass) this.currentAttack.push(new secondAttackClass(this.centerX,this.centerY,this.scores));
   }
 
   loop() {
@@ -158,31 +451,7 @@ export class Game {
     this.draw();
     requestAnimationFrame(() => this.loop());
   }
-
-  getPlayerPos(p) {
-    return {
-      x: this.centerX + Math.cos(p.angle) * CONFIG.circleRadius,
-      y: this.centerY + Math.sin(p.angle) * CONFIG.circleRadius
-    };
-  }
-
-startNextAttack() {
-    const list = [
-      EdgeStraightLaserAttack,
-      FireballAttack,
-      RocketAttack,
-      ZoneAttack,
-      LaserAttack,
-      AcidAttack,
-      GreenLaserAttack,
-      StraightLaserAttack,
-      BombAttack
-    ];
-    const A = list[Math.floor(Math.random() * list.length)];
-    this.currentAttack = new A(this.centerX, this.centerY, this.scores);
-  }
 }
-
 
 /* ===================== FIREBALLS ===================== */
 
@@ -324,16 +593,20 @@ export class RocketAttack {
 
     // количество серий (50+ очков → 4 серии)
     this.series = maxPlayerScore >= 50 ? 4 : 1;
+    this.currentSeries = 0;
 
-    // запускаем серии
-    this.launchSeries(0);
-
-    // завершение атаки через 5 секунд + задержка для серий
-    setTimeout(() => { this.done = true; }, 1000 + (this.series - 1) * 1500);
+    // запускаем первую серию
+    this.launchSeries();
   }
 
-  launchSeries(currentSeries) {
-    if (currentSeries >= this.series) return;
+  launchSeries() {
+    if (this.currentSeries >= this.series) {
+      // завершаем атаку после последней серии
+      setTimeout(() => { this.done = true; }, 500);
+      return;
+    }
+
+    this.currentSeries++;
 
     // точки спавна
     const SPAWNS = [
@@ -347,30 +620,13 @@ export class RocketAttack {
 
     const towerOffset = 130;
 
-    const verticalOffsets = [
-      { x: -130, y: 0 },
-      { x: 130, y: 0 },
-      { x: 0, y: 0 }
-    ];
-    const horizontalOffsets = [
-      { x: 0, y: -towerOffset },
-      { x: 0, y: towerOffset },
-      { x: 0, y: 0 }
-    ];
-
+    const verticalOffsets = [{ x: -130, y: 0 }, { x: 130, y: 0 }, { x: 0, y: 0 }];
+    const horizontalOffsets = [{ x: 0, y: -towerOffset }, { x: 0, y: towerOffset }, { x: 0, y: 0 }];
     const isHorizontal = spawn.vx !== 0;
     const OFFSETS = isHorizontal ? horizontalOffsets : verticalOffsets;
 
-    const verticalWarningOffsets = [
-      { x: -25, y: 0 },
-      { x: 25, y: 0 },
-      { x: 0, y: 0 }
-    ];
-    const horizontalWarningOffsets = [
-      { x: 0, y: -25 },
-      { x: 0, y: 25 },
-      { x: 0, y: 0 }
-    ];
+    const verticalWarningOffsets = [{ x: -25, y: 0 }, { x: 25, y: 0 }, { x: 0, y: 0 }];
+    const horizontalWarningOffsets = [{ x: 0, y: -25 }, { x: 0, y: 25 }, { x: 0, y: 0 }];
     const WARNING_OFFSETS = isHorizontal ? horizontalWarningOffsets : verticalWarningOffsets;
 
     for (let i = 0; i < this.rocketCount; i++) {
@@ -391,8 +647,10 @@ export class RocketAttack {
 
       // ракета вылетает через 1 секунду после появления метки
       setTimeout(() => {
-        // вычисляем угол поворота по направлению движения
-        const angle = Math.atan2(spawn.vy, spawn.vx);
+        let angle = Math.atan2(spawn.vy, spawn.vx);
+
+        // если ракета летит влево или вверх, повернуть на 180° для PNG
+        if (spawn.vx < 0 || spawn.vy < 0) angle += Math.PI;
 
         this.rockets.push({
           x,
@@ -409,8 +667,8 @@ export class RocketAttack {
     // убираем метки через 1 секунду
     setTimeout(() => { this.warnings.length = 0; }, 1000);
 
-    // запускаем следующую серию через 1.2 секунды
-    setTimeout(() => this.launchSeries(currentSeries + 1), 1200);
+    // запускаем следующую серию только после завершения текущей
+    setTimeout(() => this.launchSeries(), 1500); 
   }
 
   update() {
@@ -427,14 +685,12 @@ export class RocketAttack {
 
   draw(ctx) {
     ctx.font = '24px Arial';
-    this.warnings.forEach(w => {
-      ctx.fillText('⚠️', w.x - 12, w.y + 12);
-    });
+    this.warnings.forEach(w => ctx.fillText('⚠️', w.x - 12, w.y + 12));
 
     this.rockets.forEach(r => {
       ctx.save();
       ctx.translate(r.x, r.y);
-      ctx.rotate(r.angle - Math.PI / -2); // корректируем для вертикальной PNG
+      ctx.rotate(r.angle - Math.PI / -2); // корректировка для вертикальной PNG
       if (rocketImg.complete) {
         ctx.drawImage(rocketImg, -r.width / 2, -r.height / 2, r.width, r.height);
       } else {
