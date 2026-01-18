@@ -102,7 +102,7 @@ export class Game {
     this.scores = {};
     this.testMode = testMode;
     this.godMode = false;
-    this.players.forEach(p => this.scores[p.color] = this.testMode ? 50 : 0);
+    this.players.forEach(p => this.scores[p.color] = this.testMode ? 29 : 0);
 
     // 3D куб
     this.bossSize = 50;
@@ -159,7 +159,7 @@ export class Game {
       testModeCheckbox.checked = this.testMode;
       testModeCheckbox.onchange = () => {
         this.testMode = testModeCheckbox.checked;
-        this.players.forEach(p => (this.scores[p.color] = this.testMode ? 50 : 0));
+        this.players.forEach(p => (this.scores[p.color] = this.testMode ? 10 : 0));
         this.updateButtonScores();
       };
     }
@@ -400,10 +400,9 @@ export class Game {
     };
   }
 
-  startNextAttack() {
+startNextAttack() {
     const list = [
-      EdgeStraightLaserAttack, FireballAttack, RocketAttack, ZoneAttack,
-      LaserAttack, AcidAttack, GreenLaserAttack, StraightLaserAttack, BombAttack
+      GreenLaserAttack
     ];
 
     if (!this.overloadActive) {
@@ -474,6 +473,9 @@ class FireballAttack {
     this.series = 3;
     this.currentSeries = 0;
 
+    this.fireSound = new Audio('assets/fireball.mp3');
+    this.fireSound.volume = 0.4;
+
     this.startSeries();
   }
 
@@ -486,95 +488,167 @@ class FireballAttack {
     this.currentSeries++;
 
     const score = Math.max(...Object.values(this.scores));
+    const count = Math.min(15, 5 + Math.floor(score / 5));
+    const speed = 4 + (score > 50 ? Math.min(4, (score - 50) / 12.5) : 0);
 
-    // ---------- КОЛИЧЕСТВО ----------
-    const baseCount = 5 + Math.floor(score / 5);
-    const count = Math.min(15, baseCount);
-
-    // ---------- СКОРОСТЬ ----------
-    const extraSpeed =
-      score <= 50 ? 0 : Math.min(4, (score - 50) / 12.5);
-    const speed = 4 + extraSpeed;
-
-    // ---------- ВРЕМЯ ПОДГОТОВКИ ----------
-    const prepTime =
-      score <= 50
-        ? 1000
-        : Math.max(500, 1000 - (score - 50) * 10);
+    const prepTime = score <= 50 ? 1000 : Math.max(500, 1000 - (score - 50) * 10);
 
     this.objects = [];
     const targets = [];
 
     for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const x = this.cx + Math.cos(angle) * CONFIG.circleRadius;
-      const y = this.cy + Math.sin(angle) * CONFIG.circleRadius;
-
-      targets.push({ angle });
-
-      // ⚠️ метка (эмодзи)
+      const a = Math.random() * Math.PI * 2;
+      targets.push(a);
       this.objects.push({
-        x,
-        y,
+        x: this.cx + Math.cos(a) * CONFIG.circleRadius,
+        y: this.cy + Math.sin(a) * CONFIG.circleRadius,
         type: 'marker'
       });
     }
 
-    // ---------- ВЫСТРЕЛ ----------
     setTimeout(() => {
       this.objects = [];
+      try {
+        this.fireSound.currentTime = 0;
+        this.fireSound.play();
+      } catch {}
 
-      targets.forEach(t => {
+      targets.forEach(a => {
         this.objects.push({
           x: this.cx,
           y: this.cy,
-          vx: Math.cos(t.angle) * speed,
-          vy: Math.sin(t.angle) * speed,
+          vx: Math.cos(a) * speed,
+          vy: Math.sin(a) * speed,
           r: 8,
-          type: 'fireball'
+          type: 'fireball',
+          trail: [],
+          particles: []
         });
       });
     }, prepTime);
 
-    // ---------- СЛЕДУЮЩАЯ СЕРИЯ ----------
     setTimeout(() => this.startSeries(), prepTime + 1100);
   }
 
   update() {
     this.objects.forEach(o => {
-      if (o.type === 'fireball') {
-        o.x += o.vx;
-        o.y += o.vy;
+      if (o.type !== 'fireball') return;
+
+      // позиция
+      o.x += o.vx;
+      o.y += o.vy;
+
+      // ---- ТРЕУГОЛЬНЫЙ ШЛЕЙФ ----
+      const len = Math.hypot(o.vx, o.vy);
+      const nx = -o.vy / len;
+      const ny =  o.vx / len;
+
+      o.trail.push({
+        x: o.x,
+        y: o.y,
+        nx,
+        ny,
+        a: 1
+      });
+      if (o.trail.length > 6) o.trail.shift();
+      o.trail.forEach(t => (t.a -= 0.15));
+
+      // ---- ПАРТИКЛЫ ----
+      if (Math.random() < 0.5) {
+        o.particles.push({
+          x: o.x,
+          y: o.y,
+          vx: (Math.random() - 0.5) * 0.6,
+          vy: (Math.random() - 0.5) * 0.6,
+          r: 2 + Math.random() * 2,
+          a: 1
+        });
       }
+
+      o.particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.a -= 0.08;
+      });
+
+      o.particles = o.particles.filter(p => p.a > 0);
     });
   }
 
   hitsPlayer(px, py) {
-    return this.objects.some(
-      o =>
-        o.type === 'fireball' &&
-        Math.hypot(px - o.x, py - o.y) < o.r + 8
+    return this.objects.some(o =>
+      o.type === 'fireball' &&
+      Math.hypot(px - o.x, py - o.y) < o.r + 8
     );
   }
 
   draw(ctx) {
-    ctx.font = '20px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
     this.objects.forEach(o => {
       if (o.type === 'marker') {
-        ctx.fillStyle = 'white';
-        ctx.fillText('⦻', o.x, o.y);
-      } else {
+  ctx.save();
+  ctx.font = '26px Arial';
+  ctx.shadowColor = 'white';
+  ctx.shadowBlur = 2;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'white';
+  ctx.fillText('⦻', o.x, o.y);
+  ctx.restore();
+  return;
+}
+
+
+      // ---- ШЛЕЙФ (ТРЕУГОЛЬНИКИ) ----
+      o.trail.forEach((t, i) => {
+        const w = o.r * (1 - i / o.trail.length);
+
+        ctx.save();
+        ctx.globalAlpha = t.a * 0.6;
+        ctx.fillStyle = 'orange';
+
+        ctx.beginPath();
+        ctx.moveTo(t.x, t.y);
+        ctx.lineTo(t.x + t.nx * w, t.y + t.ny * w);
+        ctx.lineTo(t.x - t.nx * w, t.y - t.ny * w);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      });
+
+      // ---- ПАРТИКЛЫ ----
+      o.particles.forEach(p => {
+        ctx.save();
+        ctx.globalAlpha = p.a;
+        ctx.shadowColor = 'orange';
+        ctx.shadowBlur = 10;
+
         ctx.fillStyle = 'orange';
         ctx.beginPath();
-        ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
         ctx.fill();
-      }
+        ctx.restore();
+      });
+
+      // ---- САМО ЯДРО ----
+      ctx.save();
+      ctx.shadowColor = 'orange';
+      ctx.shadowBlur = 18;
+
+      ctx.fillStyle = 'orange';
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = 'yellow';
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.r * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
     });
   }
 }
+
 
 /* ===================== ROCKET ===================== */
 // ---------------- RocketAttack ----------------
@@ -893,39 +967,25 @@ if (this.maxPlayerScore >= 0 && this.maxPlayerScore < 10) {
     ctx.restore();
   }
 }
-
-/* ===================== LASER ===================== */
-
+///===================== LASER =====================
 class LaserAttack {
   constructor(cx, cy, scores) {
     this.cx = cx;
     this.cy = cy;
-
     this.score = Math.max(...Object.values(scores));
 
     this.rotationSpeed = 0.011;
     this.dir = Math.random() < 0.5 ? 1 : -1;
     this.angle = 0;
 
-    // ---------- ЛАЗЕРЫ ----------
     this.lasers = [];
+    this.particles = [];
 
-    if (this.score < 10) {
-      // 0–10 → радиус
-      this.lasers = ['radius'];
-    } else if (this.score < 20) {
-      // 10–20 → диаметр
-      this.lasers = [0];
-    } else if (this.score < 30) {
-      // 20–30 → диаметр + радиус
-      this.lasers = [0, 'radius'];
-    } else if (this.score < 50) {
-      // 30–40 → крест (2 диаметра)
-      this.lasers = [0, Math.PI / 2];
-    } else {
-      // 50+ → крест + диагональ
-      this.lasers = [0, Math.PI / 2, Math.PI / 4];
-    }
+    if (this.score < 10) this.lasers = ['radius'];
+    else if (this.score < 20) this.lasers = [0];
+    else if (this.score < 30) this.lasers = [0, 'radius'];
+    else if (this.score < 50) this.lasers = [0, Math.PI / 2];
+    else this.lasers = [0, Math.PI / 2, Math.PI / 4];
 
     this.active = false;
     this.done = false;
@@ -940,26 +1000,14 @@ class LaserAttack {
   }
 
   update() {
-    if (this.active) {
-      this.angle += this.rotationSpeed * this.dir;
-    }
-  }
+    if (this.active) this.angle += this.rotationSpeed * this.dir;
 
-  hitsPlayer(px, py) {
-    if (!this.active) return false;
-
-    return this.lasers.some(l => {
-      const ang = this.angle + (l === 'radius' ? 0 : l);
-      const dx = Math.cos(ang);
-      const dy = Math.sin(ang);
-
-      const t = (px - this.cx) * dx + (py - this.cy) * dy;
-      if (l === 'radius' && t < 0) return false;
-
-      const lx = this.cx + t * dx;
-      const ly = this.cy + t * dy;
-      return Math.hypot(px - lx, py - ly) < 8;
+    this.particles.forEach(p => {
+      p.life--;
+      p.rot += 0.1;
     });
+
+    this.particles = this.particles.filter(p => p.life > 0);
   }
 
   draw(ctx) {
@@ -967,11 +1015,17 @@ class LaserAttack {
     ctx.translate(this.cx, this.cy);
 
     this.lasers.forEach(l => {
-      const ang = this.angle + (l === 'radius' ? 0 : l);
-      ctx.rotate(ang);
+      const baseAngle = this.angle + (l === 'radius' ? 0 : l);
+      const ends = l === 'radius' ? [1] : [1, -1];
 
-      ctx.strokeStyle = this.active ? 'red' : 'rgba(255,0,0,0.3)';
+      ctx.rotate(baseAngle);
+
+      // ---- ЛАЗЕР ----
+      const pulse = 0.85 + Math.sin(Date.now() / 180) * 0.15;
       ctx.lineWidth = this.active ? 8 : 3;
+      ctx.strokeStyle = `rgba(255,${200 + 55 * pulse},${200 + 55 * pulse},0.9)`;
+      ctx.shadowColor = 'red';
+      ctx.shadowBlur = this.active ? 12 : 0;
 
       ctx.beginPath();
       if (l === 'radius') {
@@ -983,16 +1037,108 @@ class LaserAttack {
       }
       ctx.stroke();
 
-      ctx.rotate(-ang);
+      ctx.shadowBlur = 0;
+
+      // ---- КОНЦЫ ЛАЗЕРА ----
+      ends.forEach(side => {
+        const x = side * CONFIG.circleRadius;
+
+        this.spawnParticles(baseAngle, side);
+
+        this.drawStar(ctx, x, 0);
+      });
+
+      ctx.rotate(-baseAngle);
     });
 
+    // ---- ПАРТИКЛЫ ----
+    this.particles.forEach(p => {
+      const ang = p.angle;
+      const r = CONFIG.circleRadius * p.side;
+
+      const x = Math.cos(ang) * r + Math.cos(p.spread) * 4;
+      const y = Math.sin(ang) * r + Math.sin(p.spread) * 4;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(p.rot);
+      const a = p.life / 40;
+      ctx.fillStyle = `rgba(${p.color},${a})`;
+      ctx.shadowColor = `rgba(${p.color},${a})`;
+      ctx.shadowBlur = 8 * a;
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      ctx.restore();
+    });
+
+    ctx.restore();
+  }
+
+  spawnParticles(angle, side) {
+    const MAX = 3;
+
+    const existing = this.particles.filter(
+      p => p.angle === angle && p.side === side
+    );
+
+    if (existing.length >= MAX) return;
+
+    this.particles.push({
+      angle,
+      side,
+      life: 40,
+      size: 6 + Math.random() * 4,
+      rot: Math.random() * Math.PI,
+      spread: Math.random() * Math.PI * 2,
+      color: Math.random() < 0.5 ? '255,0,0' : '255,255,255'
+    });
+  }
+  hitsPlayer(px, py) {
+  if (!this.active) return false;
+
+  const HIT_WIDTH = 10; // толщина лазера (можно менять)
+
+  return this.lasers.some(l => {
+    const ang = this.angle + (l === 'radius' ? 0 : l);
+    const dx = Math.cos(ang);
+    const dy = Math.sin(ang);
+
+    // проекция игрока на направление лазера
+    const t = (px - this.cx) * dx + (py - this.cy) * dy;
+
+    // ограничение длины
+    if (l === 'radius') {
+      if (t < 0 || t > CONFIG.circleRadius) return false;
+    } else {
+      if (t < -CONFIG.circleRadius || t > CONFIG.circleRadius) return false;
+    }
+
+    // ближайшая точка лазера
+    const lx = this.cx + dx * t;
+    const ly = this.cy + dy * t;
+
+    // расстояние до игрока
+    return Math.hypot(px - lx, py - ly) <= HIT_WIDTH;
+  });
+}
+
+
+  drawStar(ctx, x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Date.now() / 300);
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.shadowColor = 'white';
+    ctx.shadowBlur = 12;
+    ctx.fillRect(-6, -2, 12, 4);
+    ctx.fillRect(-2, -6, 4, 12);
     ctx.restore();
   }
 }
 
 
 
-/* ===================== GreenLaserAttack ===================== */
+
+/* ===================== GREEN LASER ===================== */
 class GreenLaserAttack extends LaserAttack {
   constructor(cx, cy, scores) {
     super(cx, cy, scores);
@@ -1002,6 +1148,7 @@ class GreenLaserAttack extends LaserAttack {
       this.score >= 20 ? 1000 :
       1500;
 
+    // смена направления как у тебя
     setTimeout(() => {
       this.dir *= -1;
     }, prep + 2500);
@@ -1012,13 +1159,20 @@ class GreenLaserAttack extends LaserAttack {
     ctx.translate(this.cx, this.cy);
 
     this.lasers.forEach(l => {
-      const ang = this.angle + (l === 'radius' ? 0 : l);
-      ctx.rotate(ang);
+      const baseAngle = this.angle + (l === 'radius' ? 0 : l);
+      const ends = l === 'radius' ? [1] : [1, -1];
 
-      ctx.strokeStyle = this.active
-        ? '#00ff66'
-        : 'rgba(0,255,100,0.3)';
+      ctx.rotate(baseAngle);
+
+      // ---- ЗЕЛЁНЫЙ ЛАЗЕР ----
+      const pulse = 0.85 + Math.sin(Date.now() / 180) * 0.15;
       ctx.lineWidth = this.active ? 8 : 3;
+      ctx.strokeStyle = this.active
+        ? `rgba(0, ${200 + 55 * pulse}, 120, 0.9)`
+        : 'rgba(0,255,120,0.3)';
+
+      ctx.shadowColor = '#00ff88';
+      ctx.shadowBlur = this.active ? 14 : 0;
 
       ctx.beginPath();
       if (l === 'radius') {
@@ -1030,8 +1184,81 @@ class GreenLaserAttack extends LaserAttack {
       }
       ctx.stroke();
 
-      ctx.rotate(-ang);
+      ctx.shadowBlur = 0;
+
+      // ---- КОНЦЫ ЛАЗЕРА (ЗВЁЗДЫ + ПАРТИКЛЫ) ----
+      ends.forEach(side => {
+        const x = side * CONFIG.circleRadius;
+
+        this.spawnGreenParticles(baseAngle, side);
+        this.drawGreenStar(ctx, x, 0);
+      });
+
+      ctx.rotate(-baseAngle);
     });
+
+    // ---- ПАРТИКЛЫ ----
+    this.particles.forEach(p => {
+      const r = CONFIG.circleRadius * p.side;
+
+      const x =
+        Math.cos(p.angle) * r + Math.cos(p.spread) * 4;
+      const y =
+        Math.sin(p.angle) * r + Math.sin(p.spread) * 4;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(p.rot);
+
+      const a = p.life / 40;
+      ctx.fillStyle = `rgba(${p.color},${a})`;
+      ctx.shadowColor = `rgba(${p.color},${a})`;
+      ctx.shadowBlur = 10 * a;
+
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      ctx.restore();
+    });
+
+    ctx.restore();
+  }
+
+  spawnGreenParticles(angle, side) {
+    const MAX = 3;
+
+    const existing = this.particles.filter(
+      p => p.angle === angle && p.side === side && p.green
+    );
+    if (existing.length >= MAX) return;
+
+    this.particles.push({
+      angle,
+      side,
+      life: 40,
+      size: 6 + Math.random() * 4,
+      rot: Math.random() * Math.PI,
+      spread: Math.random() * Math.PI * 2,
+      color: Math.random() < 0.5 ? '0,255,140' : '180,255,220',
+      green: true
+    });
+  }
+
+  drawGreenStar(ctx, x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Date.now() / 300);
+
+    ctx.fillStyle = 'rgba(200,255,220,0.95)';
+    ctx.shadowColor = '#00ff88';
+    ctx.shadowBlur = 14;
+
+    ctx.fillRect(-6, -2, 12, 4);
+    ctx.fillRect(-2, -6, 4, 12);
+
+    // внутренняя звезда
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = 'rgba(0,255,150,0.9)';
+    ctx.fillRect(-3, -1, 6, 2);
+    ctx.fillRect(-1, -3, 2, 6);
 
     ctx.restore();
   }
@@ -1041,16 +1268,26 @@ class GreenLaserAttack extends LaserAttack {
 
 class AcidAttack {
   constructor(cx, cy) {
+    this.cx = cx;
+    this.cy = cy;
     this.objects = [];
+    this.particles = [];
     this.done = false;
 
+    // 🔊 звук вылета кислоты
+    this.launchSound = new Audio('assets/sfx/acid_launch.mp3');
+    this.launchSound.volume = 0.45;
+    this.launchSound.play();
+
+    // ---------- ОСНОВНЫЕ КИСЛОТНЫЕ СНАРЯДЫ ----------
     for (let i = 0; i < 6; i++) {
-      const a = Math.random() * Math.PI * 2;
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.2;
       this.objects.push({
         x: cx,
-        y: cy,
-        vx: Math.cos(a) * 2,
-        vy: Math.sin(a) * 2,
+        y: cy, // стартует из центра
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
         r: 20
       });
     }
@@ -1062,22 +1299,76 @@ class AcidAttack {
     this.objects.forEach(a => {
       a.x += a.vx;
       a.y += a.vy;
+
+      // ---------- ШЛЕЙФ ПАРТИКЛОВ (треугольник) ----------
+      const particleCount = 1; // сколько партиклов на снаряд
+      for (let i = 0; i < particleCount; i++) {
+        // генерируем позицию на окружности снаряда
+        const theta = Math.random() * Math.PI * 2;
+        const radiusOffset = a.r; // радиус снаряда
+        const px = a.x + Math.cos(theta) * radiusOffset;
+        const py = a.y + Math.sin(theta) * radiusOffset;
+
+        // направление к движению снаряда плюс небольшой разброс
+        const angle = Math.atan2(a.vy, a.vx) + (Math.random() - 0.5) * 0.3;
+        const speed = 0.6 + Math.random() * 0.6;
+
+        this.particles.push({
+          x: px,
+          y: py,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          r: 2 + Math.random() * 3,
+          life: 20 + Math.floor(Math.random() * 10)
+        });
+      }
     });
+
+    // ---------- ОБНОВЛЕНИЕ ПАРТИКЛОВ ----------
+    this.particles.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life--;
+    });
+
+    this.particles = this.particles.filter(p => p.life > 0);
   }
 
   hitsPlayer(px, py) {
-    return this.objects.some(a => Math.hypot(px - a.x, py - a.y) < a.r);
+    return (
+      this.objects.some(a => Math.hypot(px - a.x, py - a.y) < a.r) ||
+      this.particles.some(p => Math.hypot(px - p.x, py - p.y) < p.r + 4)
+    );
   }
 
   draw(ctx) {
-    ctx.fillStyle = 'green';
+    // ---------- ОСНОВНАЯ КИСЛОТА ----------
     this.objects.forEach(a => {
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,255,100,0.9)';
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = '#3dff6a';
       ctx.beginPath();
       ctx.arc(a.x, a.y, a.r, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
+    });
+
+    // ---------- ШЛЕЙФ ПАРТИКЛОВ ----------
+    this.particles.forEach(p => {
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,255,120,0.8)';
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = 'rgba(100,255,150,0.9)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     });
   }
 }
+
+
 // ---------BombAttack----------
 class BombAttack {
   constructor(cx, cy, scores) {
