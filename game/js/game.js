@@ -102,7 +102,7 @@ export class Game {
     this.scores = {};
     this.testMode = testMode;
     this.godMode = false;
-    this.players.forEach(p => this.scores[p.color] = this.testMode ? 29 : 0);
+    this.players.forEach(p => this.scores[p.color] = this.testMode ? 48 : 0);
 
     // 3D куб
     this.bossSize = 50;
@@ -402,7 +402,8 @@ export class Game {
 
 startNextAttack() {
     const list = [
-      GreenLaserAttack
+      EdgeStraightLaserAttack, FireballAttack, RocketAttack, ZoneAttack,
+      LaserAttack, AcidAttack, GreenLaserAttack, StraightLaserAttack, BombAttack
     ];
 
     if (!this.overloadActive) {
@@ -651,7 +652,7 @@ class FireballAttack {
 
 
 /* ===================== ROCKET ===================== */
-// ---------------- RocketAttack ----------------
+
 const rocketImg = new Image();
 rocketImg.src = 'assets/rocket.png'; // путь к вашей PNG ракете
 
@@ -787,7 +788,6 @@ export class RocketAttack {
 
 
 /* ===================== ZONE ===================== */
-
 class ZoneAttack {
   constructor(cx, cy, scores) {
     this.cx = cx;
@@ -798,7 +798,7 @@ class ZoneAttack {
       : 0;
 
     // ---- размер зоны ----
-    let part = 0.1;          // 10%
+    let part = 0.1; // 10%
     if (maxPlayerScore >= 10) part = 0.2;
     if (maxPlayerScore >= 15) part = 0.3;
     if (maxPlayerScore >= 20) part = 0.4;
@@ -809,53 +809,86 @@ class ZoneAttack {
     if (maxPlayerScore >= 45) part = 0.9;
 
     this.size = Math.PI * 2 * part;
-
     this.start = Math.random() * Math.PI * 2;
     this.end = this.start + this.size;
 
     this.deadly = false;
     this.done = false;
 
-    setTimeout(() => (this.deadly = true), 2000);
-    setTimeout(() => (this.done = true), 3000);
-  }
+    // скорость пульсации
+    this.pulseSpeed = 0; //0.0075
 
-  update() {}
+    // ---- Таймеры ----
+    setTimeout(() => (this.deadly = true), 2000); // зона становится смертельной
+    setTimeout(() => (this.done = true), 3000);   // зона завершена
+  }
 
   hitsPlayer(px, py) {
     if (!this.deadly) return false;
 
-    // угол игрока 0..2π
     let a = Math.atan2(py - this.cy, px - this.cx);
     if (a < 0) a += Math.PI * 2;
 
-    // нормализация границ зоны
     let s = this.start % (Math.PI * 2);
     let e = this.end % (Math.PI * 2);
     if (s < 0) s += Math.PI * 2;
     if (e < 0) e += Math.PI * 2;
 
-    if (s <= e) {
-      return a >= s && a <= e;
-    } else {
-      return a >= s || a <= e;
-    }
+    if (s <= e) return a >= s && a <= e;
+    else return a >= s || a <= e;
   }
 
   draw(ctx) {
-    ctx.fillStyle = this.deadly
-      ? 'rgba(255,0,0,0.5)'
-      : 'rgba(255,255,255,0.2)';
+    const now = performance.now();
 
+    // ---- Пульсация ----
+    const pulse = 0.5 + 0.5 * Math.sin(now * this.pulseSpeed);
+    const baseColor = this.deadly ? `255,80,0` : `200,200,200`; // красная или серо-белая
+    const innerAlpha = this.deadly ? pulse * 0.6 : pulse * 0.5;
+
+    // ---- Мягкое свечение по краю зоны ----
+    const grad = ctx.createRadialGradient(
+      this.cx, this.cy, CONFIG.circleRadius * 0.7,
+      this.cx, this.cy, CONFIG.circleRadius
+    );
+    grad.addColorStop(0, `rgba(${baseColor},0)`);
+    grad.addColorStop(1, `rgba(${baseColor},${innerAlpha})`);
+
+    ctx.fillStyle = grad;
     ctx.beginPath();
     ctx.moveTo(this.cx, this.cy);
     ctx.arc(this.cx, this.cy, CONFIG.circleRadius, this.start, this.end);
     ctx.closePath();
     ctx.fill();
+
+    // ---- Бегущие светящиеся точки по дуге ----
+    const segments = 10;
+    for (let i = 0; i < segments; i++) {
+      const t = (i / segments + now / 1500) % 1;
+      const a = this.start + t * this.size;
+
+      const x = this.cx + Math.cos(a) * CONFIG.circleRadius;
+      const y = this.cy + Math.sin(a) * CONFIG.circleRadius;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate((now / 500 + i) % (Math.PI * 2));
+
+      const color = this.deadly
+        ? `rgba(${255},${100 + Math.random() * 155},0,0.8)` // красные/оранжевые
+        : `rgba(200,200,200,0.8)`;                            // серо-белые
+
+      ctx.fillStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 6;
+      ctx.fillRect(-4, -4, 8, 8);
+      ctx.restore();
+    }
   }
 }
 
-/* ===================== StraightLaserAttack  ===================== */
+
+/* ===================== StraightLaserAttack ===================== */
 class StraightLaserAttack {
   constructor(cx, cy, scores) {
     this.cx = cx;
@@ -867,13 +900,14 @@ class StraightLaserAttack {
     this.active = false;
     this.done = false;
     this.currentSeries = 0;
-    this.totalSeries = 5; // всего 5 серий
+    this.totalSeries = 5;
 
     this.laserLength = CONFIG.circleRadius;
     this.laserWidthThin = 2;
     this.laserWidthThick = 8;
 
-    this.angles = []; // массив углов для текущей серии
+    this.angles = [];
+    this.particles = [];
 
     this.startSeries();
   }
@@ -886,46 +920,32 @@ class StraightLaserAttack {
 
     this.currentSeries++;
 
-    // определяем количество лучей в серии
     let laserCount = 1;
+    if (this.maxPlayerScore >= 10) laserCount = 2;
+    if (this.maxPlayerScore >= 20) laserCount = 3;
+    if (this.maxPlayerScore >= 30) laserCount = 4;
+    if (this.maxPlayerScore >= 40) laserCount = 5;
+    if (this.maxPlayerScore >= 50) laserCount = 10;
 
-if (this.maxPlayerScore >= 0 && this.maxPlayerScore < 10) {
-  laserCount = 1; 
-} else if (this.maxPlayerScore >= 10 && this.maxPlayerScore < 20) {
-  laserCount = 2; 
-} else if (this.maxPlayerScore >= 20 && this.maxPlayerScore < 30) {
-  laserCount = 3; 
-} else if (this.maxPlayerScore >= 30 && this.maxPlayerScore < 40) {
-  laserCount = 4; 
-} else if (this.maxPlayerScore >= 40 && this.maxPlayerScore < 50) {
-  laserCount = 5; 
-} else if (this.maxPlayerScore >= 50) {
-  laserCount = 10; 
-}
-
-    // генерируем случайные углы для лучей
     this.angles = [];
     for (let i = 0; i < laserCount; i++) {
       this.angles.push(Math.random() * Math.PI * 2);
     }
 
-    // подготовка (тонкий лазер)
-    let prepTime = this.maxPlayerScore >= 50 ? 1000: 750;
+    const prepTime = this.maxPlayerScore >= 50 ? 1000 : 750;
     this.active = false;
 
-    setTimeout(() => {
-      // активные толстые лазеры
-      this.active = true;
-    }, prepTime);
-
-    setTimeout(() => {
-      // переход к следующей серии
-      this.startSeries();
-    }, prepTime + 500); // держим активный лазер 1.5 секунды
+    setTimeout(() => (this.active = true), prepTime);
+    setTimeout(() => this.startSeries(), prepTime + 500);
   }
 
   update() {
-    // статичные лазеры, можно добавить вращение
+    this.particles.forEach(p => {
+      p.life--;
+      p.rot += 0.12;
+    });
+
+    this.particles = this.particles.filter(p => p.life > 0);
   }
 
   hitsPlayer(px, py) {
@@ -946,27 +966,108 @@ if (this.maxPlayerScore >= 0 && this.maxPlayerScore < 10) {
     ctx.translate(this.cx, this.cy);
 
     const len = this.laserLength;
+    const pulse = 0.85 + Math.sin(Date.now() / 180) * 0.15;
 
     this.angles.forEach(angle => {
+      ctx.save();
+      ctx.rotate(angle);
+
+      // ---- ЛАЗЕР ----
       if (!this.active) {
-        // тонкий подготовительный лазер
         ctx.strokeStyle = 'rgba(255,255,255,0.5)';
         ctx.lineWidth = this.laserWidthThin;
+        ctx.shadowBlur = 0;
       } else {
-        // активный толстый лазер
-        ctx.strokeStyle = 'red';
+        ctx.strokeStyle = `rgba(255,${200 + 55 * pulse},${200 + 55 * pulse},0.95)`;
         ctx.lineWidth = this.laserWidthThick;
+        ctx.shadowColor = 'red';
+        ctx.shadowBlur = 14;
       }
 
       ctx.beginPath();
-      ctx.moveTo(-len * Math.cos(angle), -len * Math.sin(angle));
-      ctx.lineTo(len * Math.cos(angle), len * Math.sin(angle));
+      ctx.moveTo(-len, 0);
+      ctx.lineTo(len, 0);
       ctx.stroke();
+
+      ctx.shadowBlur = 0;
+
+      // ---- КОНЦЫ ЛАЗЕРА ----
+      [-1, 1].forEach(side => {
+        const x = side * len;
+
+        this.spawnParticles(angle, side);
+        this.drawStar(ctx, x, 0);
+      });
+
+      ctx.restore();
+    });
+
+    // ---- ПАРТИКЛЫ ----
+    this.particles.forEach(p => {
+      const r = CONFIG.circleRadius * p.side;
+
+      const x =
+        Math.cos(p.angle) * r + Math.cos(p.spread) * 4;
+      const y =
+        Math.sin(p.angle) * r + Math.sin(p.spread) * 4;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(p.rot);
+
+      const a = p.life / 40;
+      ctx.fillStyle = `rgba(${p.color},${a})`;
+      ctx.shadowColor = `rgba(${p.color},${a})`;
+      ctx.shadowBlur = 10 * a;
+
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      ctx.restore();
     });
 
     ctx.restore();
   }
+
+  spawnParticles(angle, side) {
+    const MAX = 3;
+
+    const existing = this.particles.filter(
+      p => p.angle === angle && p.side === side
+    );
+    if (existing.length >= MAX) return;
+
+    this.particles.push({
+      angle,
+      side,
+      life: 40,
+      size: 6 + Math.random() * 4,
+      rot: Math.random() * Math.PI,
+      spread: Math.random() * Math.PI * 2,
+      color: Math.random() < 0.5 ? '255,0,0' : '255,255,255'
+    });
+  }
+
+  drawStar(ctx, x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Date.now() / 300);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.shadowColor = 'white';
+    ctx.shadowBlur = 12;
+
+    ctx.fillRect(-6, -2, 12, 4);
+    ctx.fillRect(-2, -6, 4, 12);
+
+    // внутренняя звезда
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = 'rgba(255,80,80,0.9)';
+    ctx.fillRect(-3, -1, 6, 2);
+    ctx.fillRect(-1, -3, 2, 6);
+
+    ctx.restore();
+  }
 }
+
 ///===================== LASER =====================
 class LaserAttack {
   constructor(cx, cy, scores) {
@@ -1276,7 +1377,7 @@ class AcidAttack {
 
     // 🔊 звук вылета кислоты
     this.launchSound = new Audio('assets/sfx/acid_launch.mp3');
-    this.launchSound.volume = 0.45;
+    this.launchSound.volume = 0.7;
     this.launchSound.play();
 
     // ---------- ОСНОВНЫЕ КИСЛОТНЫЕ СНАРЯДЫ ----------
@@ -1387,16 +1488,16 @@ class BombAttack {
     this.zoneRadius = 50;
     this.bombRadius = 20;
 
-    this.explosionDuration = 700; // длительность анимации взрыва (мс)
+    this.explosionDuration = 700;
 
     this.prepTime = Math.max(750, 1500 - (this.maxPlayerScore * 15));
     this.bombCount = Math.min(5, 1 + Math.floor(this.maxPlayerScore / 10));
 
-    // красные зоны
+    // зоны
     for (let i = 0; i < this.bombCount; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const x = this.cx + Math.cos(angle) * CONFIG.circleRadius;
-      const y = this.cy + Math.sin(angle) * CONFIG.circleRadius;
+      const a = Math.random() * Math.PI * 2;
+      const x = this.cx + Math.cos(a) * CONFIG.circleRadius;
+      const y = this.cy + Math.sin(a) * CONFIG.circleRadius;
       this.zone.push({ x, y, visible: true });
     }
 
@@ -1423,14 +1524,13 @@ class BombAttack {
           targetX: z.x,
           targetY: z.y,
           exploded: false,
-          zoneIndex: i
+          zoneIndex: i,
+          particles: []
         });
       }, i * 300);
     });
 
-    setTimeout(() => {
-      this.done = true;
-    }, 2000 + this.bombCount * 100);
+    setTimeout(() => (this.done = true), 2000 + this.bombCount * 100);
   }
 
   update() {
@@ -1441,33 +1541,52 @@ class BombAttack {
         b.x += b.vx;
         b.y += b.vy;
 
+        // партиклы полёта
+        b.particles.push({
+          x: b.x,
+          y: b.y,
+          vx: (Math.random() - 0.5) * 0.6,
+          vy: (Math.random() - 0.5) * 0.6,
+          life: 20,
+          rot: Math.random() * Math.PI
+        });
+
+        b.particles.forEach(p => {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.life--;
+          p.rot += 0.2;
+        });
+
+        b.particles = b.particles.filter(p => p.life > 0);
+
         if (Math.hypot(b.x - b.targetX, b.y - b.targetY) < 5) {
           b.exploded = true;
           this.zone[b.zoneIndex].visible = false;
-
-          // создаём взрыв
           this.explosions.push(this.createExplosion(b.targetX, b.targetY));
         }
       }
     });
 
-    // обновляем взрывы
-    this.explosions = this.explosions.filter(e => {
-      return now - e.startTime < this.explosionDuration;
-    });
+    this.explosions = this.explosions.filter(
+      e => now - e.startTime < this.explosionDuration
+    );
   }
 
   createExplosion(x, y) {
     const particles = [];
 
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 28; i++) {
       const a = Math.random() * Math.PI * 2;
       const s = Math.random() * 2 + 1;
       particles.push({
         x,
         y,
         vx: Math.cos(a) * s,
-        vy: Math.sin(a) * s
+        vy: Math.sin(a) * s,
+        life: 40,
+        rot: Math.random() * Math.PI,
+        size: 4 + Math.random() * 3
       });
     }
 
@@ -1488,7 +1607,7 @@ class BombAttack {
   draw(ctx) {
     const now = performance.now();
 
-    // красные зоны подготовки
+    // зоны
     this.zone.forEach(z => {
       if (z.visible) {
         ctx.fillStyle = `rgba(255,0,0,${0.3 + 0.2 * Math.sin(now / 200)})`;
@@ -1501,43 +1620,72 @@ class BombAttack {
     // бомбы
     this.bombs.forEach(b => {
       if (!b.exploded) {
-        ctx.fillStyle = 'black';
+        ctx.save();
+        ctx.translate(b.x, b.y);
+
+        ctx.shadowColor = 'orange';
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#111';
+
         ctx.beginPath();
-        ctx.arc(b.x, b.y, this.bombRadius, 0, Math.PI * 2);
+        ctx.arc(0, 0, this.bombRadius, 0, Math.PI * 2);
         ctx.fill();
+
+        ctx.shadowBlur = 0;
+
+        // партиклы полёта
+        b.particles.forEach(p => {
+          ctx.save();
+          ctx.translate(p.x - b.x, p.y - b.y);
+          ctx.rotate(p.rot);
+          const a = p.life / 20;
+          ctx.fillStyle = `rgba(255,120,60,${a})`;
+          ctx.fillRect(-2, -2, 4, 4);
+          ctx.restore();
+        });
+
+        ctx.restore();
       }
     });
 
     // взрывы
     this.explosions.forEach(e => {
       const t = (now - e.startTime) / this.explosionDuration;
-      const radius = this.zoneRadius * (0.3 + t);
       const alpha = 1 - t;
+      const radius = this.zoneRadius * (0.4 + t);
 
       // основное свечение
-      const grad = ctx.createRadialGradient(
-        e.x, e.y, 0,
-        e.x, e.y, radius
-      );
-      grad.addColorStop(0, `rgba(255,220,120,${alpha})`);
-      grad.addColorStop(0.5, `rgba(255,140,0,${alpha * 0.7})`);
-      grad.addColorStop(1, 'rgba(255,60,0,0)');
+      const g = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, radius);
+      g.addColorStop(0, `rgba(255,240,180,${alpha})`);
+      g.addColorStop(0.5, `rgba(255,140,0,${alpha * 0.8})`);
+      g.addColorStop(1, 'rgba(255,60,0,0)');
 
-      ctx.fillStyle = grad;
+      ctx.fillStyle = g;
       ctx.beginPath();
       ctx.arc(e.x, e.y, radius, 0, Math.PI * 2);
       ctx.fill();
 
-      // частицы
-      ctx.fillStyle = `rgba(255,180,80,${alpha})`;
+      // частицы взрыва
       e.particles.forEach(p => {
         p.x += p.vx;
         p.y += p.vy;
-        ctx.fillRect(p.x, p.y, 3, 3);
+        p.life--;
+        p.rot += 0.25;
+
+        const a = p.life / 40;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = `rgba(255,180,80,${a})`;
+        ctx.shadowColor = 'orange';
+        ctx.shadowBlur = 60 * a;
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+        ctx.restore();
       });
     });
   }
 }
+
 /* ===================== EdgeStraightLaserAttack ===================== */
 export class EdgeStraightLaserAttack {
   constructor(cx, cy, scores) {
@@ -1550,13 +1698,13 @@ export class EdgeStraightLaserAttack {
     this.active = false;
     this.done = false;
     this.currentSeries = 0;
-    this.totalSeries = 5; // всего серий
+    this.totalSeries = 5;
 
     this.laserWidthThin = 2;
     this.laserWidthThick = 8;
-    this.laserLength = CONFIG.circleRadius * 2; // лазер проходит через хорду
 
-    this.seriesLasers = []; // массив лазеров текущей серии
+    this.seriesLasers = [];
+    this.particles = [];
 
     this.startSeries();
   }
@@ -1569,7 +1717,6 @@ export class EdgeStraightLaserAttack {
 
     this.currentSeries++;
 
-    // определяем количество лазеров в серии
     let laserCount = 1;
     if (this.maxPlayerScore >= 10) laserCount = 2;
     if (this.maxPlayerScore >= 20) laserCount = 3;
@@ -1577,33 +1724,29 @@ export class EdgeStraightLaserAttack {
     if (this.maxPlayerScore >= 40) laserCount = 5;
     if (this.maxPlayerScore >= 50) laserCount = 10;
 
-    // генерируем случайные смещения от центра, чтобы лазеры не проходили через центр
     const offsets = [];
     for (let i = 0; i < laserCount; i++) {
-      offsets.push((Math.random() - 0.5) * CONFIG.circleRadius * 1.5); // случайное смещение по перпендикуляру к линии
+      offsets.push((Math.random() - 0.5) * CONFIG.circleRadius * 1.5);
     }
 
-    // генерируем случайные углы направления лазеров
-    this.seriesLasers = offsets.map(offset => {
-      const angle = Math.random() * Math.PI * 2; // направление лазера
-      return { angle, offset };
-    });
+    this.seriesLasers = offsets.map(offset => ({
+      angle: Math.random() * Math.PI * 2,
+      offset
+    }));
 
     this.active = false;
 
-    // подготовка (тонкий лазер)
     const prepTime = this.maxPlayerScore >= 50 ? 1000 : 750;
-
-    setTimeout(() => {
-      this.active = true; // активный лазер
-    }, prepTime);
-
-    // переход к следующей серии после окончания этой
-    setTimeout(() => this.startSeries(), prepTime + 500); // 0.5s активного лазера
+    setTimeout(() => (this.active = true), prepTime);
+    setTimeout(() => this.startSeries(), prepTime + 500);
   }
 
   update() {
-    // лазеры статичные, вращение не используется
+    this.particles.forEach(p => {
+      p.life--;
+      p.rot += 0.12;
+    });
+    this.particles = this.particles.filter(p => p.life > 0);
   }
 
   hitsPlayer(px, py) {
@@ -1615,16 +1758,13 @@ export class EdgeStraightLaserAttack {
       const dx = Math.cos(laser.angle);
       const dy = Math.sin(laser.angle);
 
-      // смещаем линию от центра по перпендикуляру
       const perpX = -dy * laser.offset;
       const perpY = dx * laser.offset;
 
-      // проектируем игрока на линию лазера
       const t = (px - (this.cx + perpX)) * dx + (py - (this.cy + perpY)) * dy;
       const lx = this.cx + perpX + t * dx;
       const ly = this.cy + perpY + t * dy;
 
-      // ограничиваем длину лазера хордами круга
       const maxLen = Math.sqrt(R * R - laser.offset * laser.offset);
       if (t < -maxLen || t > maxLen) return false;
 
@@ -1636,30 +1776,113 @@ export class EdgeStraightLaserAttack {
     ctx.save();
     ctx.translate(this.cx, this.cy);
 
+    const pulse = 0.85 + Math.sin(Date.now() / 180) * 0.15;
+    const R = CONFIG.circleRadius;
+
     this.seriesLasers.forEach(laser => {
       const dx = Math.cos(laser.angle);
       const dy = Math.sin(laser.angle);
 
-      // смещение по перпендикуляру
       const perpX = -dy * laser.offset;
       const perpY = dx * laser.offset;
 
-      const R = CONFIG.circleRadius;
       const halfLen = Math.sqrt(R * R - laser.offset * laser.offset);
 
-      ctx.beginPath();
+      // ---- ЛАЗЕР ----
       if (!this.active) {
         ctx.strokeStyle = 'rgba(255,255,255,0.5)';
         ctx.lineWidth = this.laserWidthThin;
+        ctx.shadowBlur = 0;
       } else {
-        ctx.strokeStyle = 'red';
+        ctx.strokeStyle = `rgba(255,${200 + 55 * pulse},${200 + 55 * pulse},0.95)`;
         ctx.lineWidth = this.laserWidthThick;
+        ctx.shadowColor = 'red';
+        ctx.shadowBlur = 14;
       }
 
+      ctx.beginPath();
       ctx.moveTo(perpX - dx * halfLen, perpY - dy * halfLen);
       ctx.lineTo(perpX + dx * halfLen, perpY + dy * halfLen);
       ctx.stroke();
+
+      ctx.shadowBlur = 0;
+
+      // ---- КОНЦЫ ЛАЗЕРА ----
+      [-1, 1].forEach(side => {
+        const x = perpX + dx * halfLen * side;
+        const y = perpY + dy * halfLen * side;
+
+        this.spawnParticles(laser.angle, laser.offset, side);
+        this.drawStar(ctx, x, y);
+      });
     });
+
+    // ---- ПАРТИКЛЫ ----
+    this.particles.forEach(p => {
+      const dx = Math.cos(p.angle);
+      const dy = Math.sin(p.angle);
+
+      const perpX = -dy * p.offset;
+      const perpY = dx * p.offset;
+
+      const halfLen = Math.sqrt(R * R - p.offset * p.offset);
+
+      const x =
+        perpX + dx * halfLen * p.side + Math.cos(p.spread) * 4;
+      const y =
+        perpY + dy * halfLen * p.side + Math.sin(p.spread) * 4;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(p.rot);
+
+      const a = p.life / 40;
+      ctx.fillStyle = `rgba(${p.color},${a})`;
+      ctx.shadowColor = `rgba(${p.color},${a})`;
+      ctx.shadowBlur = 10 * a;
+
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      ctx.restore();
+    });
+
+    ctx.restore();
+  }
+
+  spawnParticles(angle, offset, side) {
+    const MAX = 3;
+    const existing = this.particles.filter(
+      p => p.angle === angle && p.offset === offset && p.side === side
+    );
+    if (existing.length >= MAX) return;
+
+    this.particles.push({
+      angle,
+      offset,
+      side,
+      life: 40,
+      size: 6 + Math.random() * 4,
+      rot: Math.random() * Math.PI,
+      spread: Math.random() * Math.PI * 2,
+      color: Math.random() < 0.5 ? '255,0,0' : '255,255,255'
+    });
+  }
+
+  drawStar(ctx, x, y) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Date.now() / 300);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.shadowColor = 'white';
+    ctx.shadowBlur = 12;
+
+    ctx.fillRect(-6, -2, 12, 4);
+    ctx.fillRect(-2, -6, 4, 12);
+
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = 'rgba(255,80,80,0.9)';
+    ctx.fillRect(-3, -1, 6, 2);
+    ctx.fillRect(-1, -3, 2, 6);
 
     ctx.restore();
   }
