@@ -119,6 +119,8 @@ export class Game {
     // Overload
     this.overloadActive = false;
     this.overloadMusic = new Audio('assets/overload.mp3');
+    this.preOverloadMusic = new Audio('assets/normal.mp3'); // обычная музыка
+    this.preOverloadMusic.loop = true; // повтор
     this.overloadDelay = 8000;
     this.pulses = [];
 
@@ -199,9 +201,15 @@ export class Game {
     this.players.forEach(p => p.update());
     const maxScore = Math.max(...Object.values(this.scores));
 
+    // проигрываем обычную музыку до Overload
+    if (!this.overloadActive && maxScore < 50) {
+      if (this.preOverloadMusic.paused) this.preOverloadMusic.play();
+    }
+
     // Overload режим
     if (!this.overloadActive && maxScore >= 50) {
       this.overloadActive = true;
+      if (this.preOverloadMusic) this.preOverloadMusic.pause();
       if (this.overloadMusic) this.overloadMusic.play();
       this.nextAttackTime = now + this.overloadDelay;
 
@@ -232,7 +240,6 @@ export class Game {
       const attacks = Array.isArray(this.currentAttack) ? this.currentAttack : [this.currentAttack];
       attacks.forEach(a => a.update?.());
 
-      // проверка завершения атак
       if (attacks.every(a => a.done)) {
         this.players.forEach(pl => { if (pl.alive) this.scores[pl.color]++; });
         this.updateButtonScores();
