@@ -12,10 +12,12 @@ class OverloadManager {
     this.threshold = 50;        // с каких очков
     this.introDelay = 3000;     // пауза перед стартом атак
     this.nextAttackDelay = 400;
+    SoundManager.init();
+
 
     this.music = new Audio('assets/overload.mp3');
     this.music.loop = true;
-    this.music.volume = 0.6;
+    this.music.volume = 0.4;
   }
 
   getMaxScore() {
@@ -82,6 +84,104 @@ class OverloadManager {
     ];
   }
 }
+
+/* ===================== SOUND MANAGER ===================== */
+export const SoundManager = {
+  // аудио объекты
+  laserAudio: new Audio('assets/laser.mp3'),
+  bombAudio: new Audio('assets/bomb_explosion.mp3'),
+
+  laserPlaying: false,
+
+  init() {
+    this.laserAudio.loop = true;
+    this.laserAudio.volume = 0.6;
+
+    this.bombAudio.loop = false;
+    this.bombAudio.volume = 0.7;
+  },
+
+  // ---------------- LASER ----------------
+  playLaser() {
+    if (!this.laserPlaying) {
+      this.laserAudio.currentTime = 0;
+      this.laserAudio.play().catch(() => {});
+      this.laserPlaying = true;
+    }
+  },
+
+  stopLaser() {
+    if (this.laserPlaying) {
+      this.laserAudio.pause();
+      this.laserAudio.currentTime = 0;
+      this.laserPlaying = false;
+    }
+  },
+
+  // ---------------- BOMB ----------------
+  playBomb() {
+    const bombClone = this.bombAudio.cloneNode();
+    bombClone.volume = this.bombAudio.volume;
+    bombClone.play().catch(() => {});
+  },
+
+  // ---------------- UTILS ----------------
+  stopAll() {
+    this.stopLaser();
+  }
+};
+
+// Инициализация звуков
+SoundManager.init();
+
+/* ===================== ATTACK SOUND CONTROLLER ===================== */
+export class AttackSoundController {
+  /**
+   * Обновляет звуки для всех атак
+   * @param {Array} attacks - массив атак
+   */
+  static update(attacks) {
+    let anyDeadlyLaser = false;
+
+    attacks.forEach(a => {
+      // ---------- LASERS ONLY ----------
+      if (
+        a instanceof LaserAttack ||
+        a instanceof GreenLaserAttack ||
+        a instanceof StraightLaserAttack ||
+        a instanceof EdgeStraightLaserAttack
+      ) {
+        if (a.active) anyDeadlyLaser = true;
+      }
+
+      // ---------- BOMB SERIES ----------
+      if (a.explosions) {
+        a.explosions.forEach(e => {
+          if (!e._soundPlayed) {
+            SoundManager.playBomb();
+            e._soundPlayed = true;
+          }
+        });
+      }
+
+      // ---------- SINGLE BOMB ----------
+      if (a.exploded && !a._soundPlayed) {
+        SoundManager.playBomb();
+        a._soundPlayed = true;
+      }
+    });
+
+    // ---------- GLOBAL LASER CONTROL ----------
+    if (anyDeadlyLaser) {
+      SoundManager.playLaser();
+    } else {
+      SoundManager.stopLaser();
+    }
+  }
+}
+
+
+
 /* ===================== GAME ===================== */
 export class Game {
   constructor(canvas, playerCount, testMode = false) {
@@ -102,7 +202,7 @@ export class Game {
     this.scores = {};
     this.testMode = testMode;
     this.godMode = false;
-    this.players.forEach(p => this.scores[p.color] = this.testMode ? 48 : 0);
+    this.players.forEach(p => this.scores[p.color] = this.testMode ? 50 : 0);
 
     // 3D куб
     this.bossSize = 50;
@@ -233,12 +333,38 @@ export class Game {
       this.bossSpeedX = (Math.random() * 0.03 - 0.015) * (1 + maxScore / 50);
       this.bossSpeedY = (Math.random() * 0.03 - 0.015) * (1 + maxScore / 50);
       this.bossSpeedZ = (Math.random() * 0.03 - 0.015) * (1 + maxScore / 50);
+      const attacks = Array.isArray(this.currentAttack)
+  ? this.currentAttack
+  : [this.currentAttack];
+
+attacks.forEach(a => {
+  if (
+    a instanceof LaserAttack ||
+    a instanceof GreenLaserAttack ||
+    a instanceof StraightLaserAttack ||
+    a instanceof EdgeStraightLaserAttack
+  ) {
+    SoundManager.playLaser()
+SoundManager.stopLaser()
+
+  }
+
+  if (a instanceof BombAttack) {
+    // звук ТОЛЬКО при взрыве, не здесь
+    a._soundHooked = false;
+  }
+});
+
     }
 
     // обновляем текущую атаку
     if (this.currentAttack) {
       const attacks = Array.isArray(this.currentAttack) ? this.currentAttack : [this.currentAttack];
       attacks.forEach(a => a.update?.());
+      AttackSoundController.update(attacks);
+
+
+
 
       if (attacks.every(a => a.done)) {
         this.players.forEach(pl => { if (pl.alive) this.scores[pl.color]++; });
@@ -402,8 +528,7 @@ export class Game {
 
 startNextAttack() {
     const list = [
-      EdgeStraightLaserAttack, FireballAttack, RocketAttack, ZoneAttack,
-      LaserAttack, AcidAttack, GreenLaserAttack, StraightLaserAttack, BombAttack
+RocketAttack
     ];
 
     if (!this.overloadActive) {
@@ -475,7 +600,7 @@ class FireballAttack {
     this.currentSeries = 0;
 
     this.fireSound = new Audio('assets/fireball.mp3');
-    this.fireSound.volume = 0.4;
+    this.fireSound.volume = 0.7;
 
     this.startSeries();
   }
@@ -654,16 +779,19 @@ class FireballAttack {
 /* ===================== ROCKET ===================== */
 
 const rocketImg = new Image();
-rocketImg.src = 'assets/rocket.png'; // путь к вашей PNG ракете
+rocketImg.src = 'assets/rocket.png'; // путь к PNG ракеты
 
 export class RocketAttack {
-  constructor(cx, cy, scores) {
+  constructor(cx, cy, scores, debug = false) {
     this.cx = cx;
     this.cy = cy;
 
+
     this.warnings = [];
     this.rockets = [];
+    this.particles = [];
     this.done = false;
+    this.debug = debug;
 
     const maxPlayerScore = Math.max(...Object.values(scores));
 
@@ -677,29 +805,31 @@ export class RocketAttack {
     this.series = maxPlayerScore >= 50 ? 4 : 1;
     this.currentSeries = 0;
 
-    // запускаем первую серию
+    // Звуки ракеты
+    this.launchSound = new Audio('assets/rocket_launch.mp3');
+    this.explosionSound = new Audio('assets/rocket_explosion.mp3');
+    this.launchSound.volume = 0.5;
+    this.explosionSound.volume = 0.6;
+
     this.launchSeries();
   }
 
   launchSeries() {
     if (this.currentSeries >= this.series) {
-      // завершаем атаку после последней серии
-      setTimeout(() => { this.done = true; }, 500);
+      setTimeout(() => { this.done = true; }, 700);
       return;
     }
 
     this.currentSeries++;
 
-    // точки спавна
     const SPAWNS = [
-      { x: 0, y: -CONFIG.circleRadius - 70, vx: 0, vy: 3 },   // сверху
-      { x: 0, y:  CONFIG.circleRadius + 70, vx: 0, vy: -3 },  // снизу
-      { x: -CONFIG.circleRadius - 70, y: 0, vx: 3, vy: 0 },   // слева
-      { x:  CONFIG.circleRadius + 70, y: 0, vx: -3, vy: 0 }   // справа
+      { x: 0, y: -CONFIG.circleRadius - 70, vx: 0, vy: 3 },
+      { x: 0, y: CONFIG.circleRadius + 70, vx: 0, vy: -3 },
+      { x: -CONFIG.circleRadius - 70, y: 0, vx: 3, vy: 0 },
+      { x: CONFIG.circleRadius + 70, y: 0, vx: -3, vy: 0 }
     ];
 
     const spawn = SPAWNS[Math.floor(Math.random() * SPAWNS.length)];
-
     const towerOffset = 130;
 
     const verticalOffsets = [{ x: -130, y: 0 }, { x: 130, y: 0 }, { x: 0, y: 0 }];
@@ -716,7 +846,6 @@ export class RocketAttack {
       const x = this.cx + spawn.x + off.x;
       const y = this.cy + spawn.y + off.y;
 
-      // предупреждение ближе к центру
       const factor = 0.8;
       let warningX = this.cx + (x - this.cx) * factor;
       let warningY = this.cy + (y - this.cy) * factor;
@@ -727,11 +856,11 @@ export class RocketAttack {
 
       this.warnings.push({ x: warningX, y: warningY });
 
-      // ракета вылетает через 1 секунду после появления метки
       setTimeout(() => {
-        let angle = Math.atan2(spawn.vy, spawn.vx);
+        this.launchSound.currentTime = 0;
+        this.launchSound.play().catch(() => {});
 
-        // если ракета летит влево или вверх, повернуть на 180° для PNG
+        let angle = Math.atan2(spawn.vy, spawn.vx);
         if (spawn.vx < 0 || spawn.vy < 0) angle += Math.PI;
 
         this.rockets.push({
@@ -746,11 +875,8 @@ export class RocketAttack {
       }, 1000);
     }
 
-    // убираем метки через 1 секунду
     setTimeout(() => { this.warnings.length = 0; }, 1000);
-
-    // запускаем следующую серию только после завершения текущей
-    setTimeout(() => this.launchSeries(), 1500); 
+    setTimeout(() => this.launchSeries(), 1500);
   }
 
   update() {
@@ -758,7 +884,31 @@ export class RocketAttack {
       r.x += r.vx;
       r.y += r.vy;
       r.angle = Math.atan2(r.vy, r.vx);
+
+      // создаем партиклы следа ракеты
+      this.particles.push({
+        x: r.x - r.vx * 0.5,
+        y: r.y - r.vy * 0.5,
+        alpha: 1,
+        size: Math.random() * 3 + 2,
+        vx: (Math.random() - 0.5) * 1.5,
+        vy: (Math.random() - 0.5) * 1.5,
+        color: Math.random() < 0.5 ? 'rgba(255,165,0,' : 'rgba(255,255,0,'
+      });
+
+      if (Math.hypot(r.x - this.cx, r.y - this.cy) > CONFIG.circleRadius + 100) {
+        this.explosionSound.currentTime = 0;
+        this.explosionSound.play().catch(() => {});
+        r.exploded = true;
+      }
     });
+
+    this.particles.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.alpha -= 0.03;
+    });
+    this.particles = this.particles.filter(p => p.alpha > 0);
   }
 
   hitsPlayer(px, py) {
@@ -769,10 +919,24 @@ export class RocketAttack {
     ctx.font = '24px Arial';
     this.warnings.forEach(w => ctx.fillText('⚠️', w.x - 12, w.y + 12));
 
+    // партиклы с свечением
+this.particles.forEach(p => {
+  ctx.save(); // сохранение контекста
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+  ctx.fillStyle = p.color + p.alpha + ')';
+  ctx.shadowColor = p.color + p.alpha + ')';
+  ctx.shadowBlur = 4; // свечения только для этого элемента
+  ctx.fill();
+  ctx.restore(); // восстановление контекста — остальные объекты не светятся
+});
+
+
+    // ракеты
     this.rockets.forEach(r => {
       ctx.save();
       ctx.translate(r.x, r.y);
-      ctx.rotate(r.angle - Math.PI / -2); // корректировка для вертикальной PNG
+      ctx.rotate(r.angle - Math.PI / -2);
       if (rocketImg.complete) {
         ctx.drawImage(rocketImg, -r.width / 2, -r.height / 2, r.width, r.height);
       } else {
@@ -781,10 +945,19 @@ export class RocketAttack {
       }
       ctx.restore();
     });
+
+    // отладка хитбоксов
+    if (this.debug) {
+      ctx.strokeStyle = 'lime';
+      ctx.lineWidth = 2;
+      this.rockets.forEach(r => {
+        ctx.beginPath();
+        ctx.rect(r.x - 16, r.y - 16, 32, 32);
+        ctx.stroke();
+      });
+    }
   }
 }
-
-
 
 
 /* ===================== ZONE ===================== */
@@ -1377,7 +1550,7 @@ class AcidAttack {
 
     // 🔊 звук вылета кислоты
     this.launchSound = new Audio('assets/sfx/acid_launch.mp3');
-    this.launchSound.volume = 0.7;
+    this.launchSound.volume = 0.9;
     this.launchSound.play();
 
     // ---------- ОСНОВНЫЕ КИСЛОТНЫЕ СНАРЯДЫ ----------
@@ -1561,6 +1734,11 @@ class BombAttack {
         b.particles = b.particles.filter(p => p.life > 0);
 
         if (Math.hypot(b.x - b.targetX, b.y - b.targetY) < 5) {
+          if (!this._playedExplosionSound) {
+  SoundManager.playBomb();
+  this._playedExplosionSound = true;
+}
+
           b.exploded = true;
           this.zone[b.zoneIndex].visible = false;
           this.explosions.push(this.createExplosion(b.targetX, b.targetY));
@@ -1885,5 +2063,64 @@ export class EdgeStraightLaserAttack {
     ctx.fillRect(-1, -3, 2, 6);
 
     ctx.restore();
+  }
+}
+class AttackSoundManager {
+  constructor() {
+    // ---- Звуки ----
+    this.laserSound = new Audio('assets/laser.mp3');
+    this.laserSound.volume = 1;
+
+    this.bombSound = new Audio('assets/bomb_explosion.mp3');
+    this.bombSound.volume = 0.7;
+
+    // ---- Активные объекты для предотвращения повторного проигрывания ----
+    this.activeLasers = new Set();
+    this.activeBombExplosions = new Set();
+  }
+
+  update(attacks) {
+    if (!attacks || !Array.isArray(attacks)) return;
+
+    attacks.forEach(att => {
+      if (!att) return; // пропустить undefined или null
+
+      // ---- ЛАЗЕРНЫЕ АТАКИ ----
+      if (
+        (att instanceof LaserAttack) ||
+        (att instanceof GreenLaserAttack) ||
+        (att instanceof StraightLaserAttack) ||
+        (att instanceof EdgeStraightLaserAttack)
+      ) {
+        if (att.active && !this.activeLasers.has(att)) {
+          // Проигрываем звук один раз при активации
+          this.laserSound.currentTime = 0;
+          this.laserSound.play().catch(() => {});
+          this.activeLasers.add(att);
+        } else if (!att.active && this.activeLasers.has(att)) {
+          // Когда лазер деактивируется, удаляем из Set
+          this.activeLasers.delete(att);
+        }
+      }
+
+      // ---- БОМБЫ ----
+      if (att instanceof BombAttack && Array.isArray(att.explosions)) {
+        att.explosions.forEach(explosion => {
+          if (!this.activeBombExplosions.has(explosion)) {
+            // Проигрываем звук взрыва один раз
+            this.bombSound.currentTime = 0;
+            this.bombSound.play().catch(() => {});
+            this.activeBombExplosions.add(explosion);
+          }
+        });
+
+        // Удаляем взрывы, которые уже закончились
+        att.explosions.forEach(explosion => {
+          if ((performance.now() - explosion.startTime) > att.explosionDuration) {
+            this.activeBombExplosions.delete(explosion);
+          }
+        });
+      }
+    });
   }
 }
